@@ -54,14 +54,14 @@ Item {
   readonly property var widgetDefaults: ({
     monitor: {
       visible: true,
-      position: "top-right",   // top-left | top | top-right | left | center | right | bottom-left | bottom | bottom-right
+      position: "top-left",    // top-left | top | top-right | left | center | right | bottom-left | bottom | bottom-right
       tiles: ["cpu", "gpu", "mem", "thermal", "disk", "net"],
       sensors: [],             // thermal rows to show by id (cpu, gpu, nvme, mem, wifi, ambient, battery); empty = all
       clickCommand: "omarchy-launch-or-focus-tui btop"
     },
     battery: {
       visible: true,           // still hidden while the machine reports no battery
-      position: "top-left",
+      position: "top-right",
       lowAt: 15,
       clickCommand: ""
     }

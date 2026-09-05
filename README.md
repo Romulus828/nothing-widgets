@@ -22,7 +22,7 @@ windows. Two widgets so far: a system monitor and a battery tile.
 
 ## Battery
 
-A single tile: charge ring with the percentage and state (`charging`,
+A single tile at the top-right (the monitor takes the top-left): charge ring with the percentage and state (`charging`,
 `full`, `on ac`, `on battery`), then time to full or time left, charge or
 draw in watts, health as a percentage of design capacity, and the cycle
 count. The trailing text is the pack's current energy in Wh. The LED and
@@ -112,14 +112,14 @@ optional; the defaults are shown here.
       "widgets": {
         "monitor": {
           "visible": true,
-          "position": "top-right",
+          "position": "top-left",
           "tiles": ["cpu", "gpu", "mem", "thermal", "disk", "net"],
           "sensors": [],
           "clickCommand": "omarchy-launch-or-focus-tui btop"
         },
         "battery": {
           "visible": true,
-          "position": "top-left",
+          "position": "top-right",
           "lowAt": 15,
           "clickCommand": ""
         }
