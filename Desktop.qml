@@ -242,6 +242,9 @@ Item {
     function snapshot(path: string): string { return root.snapshotTo(path, "") }
     // Same, for the window at a given position (e.g. "top-left").
     function snapshotAt(path: string, position: string): string { return root.snapshotTo(path, String(position || "")) }
+    function debug(): string {
+      return JSON.stringify(root.contentItems.map(function(c) { return c.describe() }))
+    }
     function status(): string {
       var widgets = {}
       for (var i = 0; i < root.widgetTypes.length; i++) {
@@ -377,17 +380,41 @@ Item {
       function hasWidget(name) { return modelData.widgets.indexOf(name) !== -1 }
 
       // Widgets sharing this corner, stacked with the same 8 px gutter the
-      // monitor uses between its own tiles.
-      Column {
+      // monitor uses between its own tiles. Positioned by hand rather than
+      // with a Column: positioners only lay out while their window renders,
+      // and this window only renders once it knows it has content.
+      Item {
         id: content
         readonly property string windowPosition: win.modelData.position
-        spacing: 8
+        readonly property real gutter: 8
+        // `visible` reads back *effective* visibility, which is false while
+        // this window is hidden, so the stacking is computed from the slots'
+        // own conditions rather than from their visible flags.
+        readonly property bool monitorOn: monitorSlot.active && monitorSlot.item !== null && monitorSlot.item.wanted
+        readonly property bool batteryOn: batterySlot.active && batterySlot.item !== null && batterySlot.item.wanted
+        readonly property real monitorH: monitorOn ? monitorSlot.implicitHeight : 0
+        readonly property real batteryH: batteryOn ? batterySlot.implicitHeight : 0
+        implicitWidth: Math.max(monitorOn ? monitorSlot.implicitWidth : 0, batteryOn ? batterySlot.implicitWidth : 0)
+        implicitHeight: monitorH + batteryH + (monitorH > 0 && batteryH > 0 ? gutter : 0)
+        width: implicitWidth
+        height: implicitHeight
         Component.onCompleted: root.registerContent(content)
         Component.onDestruction: root.unregisterContent(content)
 
+        function describe() {
+          function slot(k) {
+            return { active: k.active, visible: k.visible, y: k.y, ih: k.implicitHeight,
+                     item: k.item ? { wanted: k.item.wanted, ih: k.item.implicitHeight } : null }
+          }
+          return { pos: windowPosition, w: width, h: height, winVisible: win.visible, wanted: win.wanted,
+                   monitor: slot(monitorSlot), battery: slot(batterySlot) }
+        }
+
         Loader {
+          id: monitorSlot
+          y: 0
           active: win.hasWidget("monitor")
-          visible: active && item && item.visible
+          visible: content.monitorOn
           sourceComponent: SystemMonitor {
             sample: root.sample
             stale: root.stale
@@ -400,8 +427,10 @@ Item {
         }
 
         Loader {
+          id: batterySlot
+          y: content.monitorH > 0 ? content.monitorH + content.gutter : 0
           active: win.hasWidget("battery")
-          visible: active && item && item.visible
+          visible: content.batteryOn
           sourceComponent: Battery {
             sample: root.sample
             stale: root.stale

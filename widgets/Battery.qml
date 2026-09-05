@@ -35,7 +35,8 @@ Item {
   readonly property bool low: present && discharging && capacity >= 0 && capacity <= lowAt
   readonly property int level: low ? 2 : 0
 
-  visible: present
+  // Read by the host: the widget has nothing to show without a battery.
+  readonly property bool wanted: present
   implicitWidth: widgetWidth
   implicitHeight: present ? tileH : 0
 
@@ -105,7 +106,7 @@ Item {
     label: "battery"
     // Red only when the charge is actually low; hollow while data is stale.
     led: root.stale || !root.hasSample ? "hollow" : (root.low ? "on" : "off")
-    trailing: F.isNum(root.bat.energy_wh) ? F.watts(root.bat.energy_wh) + "wh" : ""
+    trailing: F.isNum(root.bat.energy_wh) ? Math.round(root.bat.energy_wh) + "WH" : ""
     trailingColor: pal.labelColor
 
     RingGauge {

@@ -20,6 +20,7 @@ Item {
   property var sensors: []          // thermal row ids to show; empty = all
   property real tileAlpha: 1.0
   property string clickCommand: ""
+  readonly property bool wanted: true   // read by the host window
 
   // ----------------------------------------------------------- palette
 

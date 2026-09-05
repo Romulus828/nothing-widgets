@@ -2,14 +2,15 @@
 
 Desktop widgets for [Omarchy](https://omarchy.org) in the design language of
 Nothing OS: black material, dot-matrix numerals, hairline tiles, and one red
-LED. The first widget is a system monitor that sits on the desktop layer,
-above the wallpaper and below your windows.
+LED. They sit on the desktop layer, above the wallpaper and below your
+windows. Two widgets so far: a system monitor and a battery tile.
 
 <p align="center">
   <img src="docs/system-monitor.png" width="300" alt="System monitor widget">
+  <img src="docs/battery.png" width="300" alt="Battery widget">
 </p>
 
-## What it shows
+## System monitor
 
 | Tile          | Contents                                                                                       |
 |---------------|------------------------------------------------------------------------------------------------|
@@ -19,8 +20,17 @@ above the wallpaper and below your windows.
 | THERMAL       | One row per sensor: name, a dot bar scaled from 20 °C to the sensor's high threshold, and the reading. Sensors above their high threshold turn red; the tile's trailing text says `hot` or `critical`. |
 | DISK · NET    | Root filesystem usage bar with used/total, plus receive and transmit rates on the primary interface. |
 
+## Battery
+
+A single tile: charge ring with the percentage and state (`charging`,
+`full`, `on ac`, `on battery`), then time to full or time left, charge or
+draw in watts, health as a percentage of design capacity, and the cycle
+count. The trailing text is the pack's current energy in Wh. The LED and
+numerals go red when the charge drops to `lowAt` percent while discharging.
+The tile hides itself on machines without a battery.
+
 Every grey is derived from the active Omarchy theme's foreground and
-background colours, so the widget stays coherent on themes other than
+background colours, so the widgets stay coherent on themes other than
 Nothing. The accent colour is used only for the live LED and for alerts.
 
 ## Requirements
@@ -59,16 +69,20 @@ omarchy plugin remove io.github.romulus828.nothing-widgets
 The widget registers an IPC target named `nothing-widgets`:
 
 ```sh
-omarchy-shell nothing-widgets toggle          # show or hide (persisted)
+omarchy-shell nothing-widgets toggle          # show or hide everything (persisted)
 omarchy-shell nothing-widgets show
 omarchy-shell nothing-widgets hide
+omarchy-shell nothing-widgets toggleWidget battery    # one widget: monitor | battery
+omarchy-shell nothing-widgets showWidget battery
+omarchy-shell nothing-widgets hideWidget monitor
 omarchy-shell nothing-widgets refresh         # restart the collector now
-omarchy-shell nothing-widgets status          # JSON: shown, collector state, sample age, screens
-omarchy-shell nothing-widgets snapshot ~/widget.png   # render the widget to a PNG
+omarchy-shell nothing-widgets status          # JSON: shown, collector state, widgets, windows, screens
+omarchy-shell nothing-widgets snapshot ~/w.png              # render the first window to a PNG
+omarchy-shell nothing-widgets snapshotAt ~/b.png top-left   # render the window at a position
 ```
 
-Clicking the widget runs the `clickCommand` setting, which opens `btop` by
-default.
+Clicking a widget runs its `clickCommand` setting. The monitor opens `btop`
+by default; the battery tile does nothing until you give it a command.
 
 A keybinding for the toggle is a one-liner in `~/.config/hypr/bindings.conf`:
 
@@ -79,41 +93,67 @@ bindd = SUPER SHIFT, N, Toggle desktop widgets, exec, omarchy-shell nothing-widg
 ## Settings
 
 Settings live inline on the plugin's entry in `~/.config/omarchy/shell.json`.
-Every key is optional; the defaults are shown here.
+Top-level keys apply to every widget. Each widget has its own object under
+`widgets` that can add its own keys or override a shared one. Every key is
+optional; the defaults are shown here.
 
 ```json
 {
   "plugins": [
     {
       "id": "io.github.romulus828.nothing-widgets",
-      "position": "top-right",
-      "marginX": 16,
-      "marginY": 16,
+      "visible": true,
       "scale": 1.0,
       "interval": 2,
+      "marginX": 16,
+      "marginY": 16,
       "screen": "",
-      "visible": true,
-      "tiles": ["cpu", "gpu", "mem", "thermal", "disk", "net"],
-      "sensors": [],
       "tileAlpha": 1.0,
-      "clickCommand": "omarchy-launch-or-focus-tui btop"
+      "widgets": {
+        "monitor": {
+          "visible": true,
+          "position": "top-right",
+          "tiles": ["cpu", "gpu", "mem", "thermal", "disk", "net"],
+          "sensors": [],
+          "clickCommand": "omarchy-launch-or-focus-tui btop"
+        },
+        "battery": {
+          "visible": true,
+          "position": "top-left",
+          "lowAt": 15,
+          "clickCommand": ""
+        }
+      }
     }
   ]
 }
 ```
 
+Shared keys:
+
 | Key            | Meaning                                                                                                    |
 |----------------|------------------------------------------------------------------------------------------------------------|
-| `position`     | `top-left`, `top`, `top-right`, `left`, `center`, `right`, `bottom-left`, `bottom`, `bottom-right`.        |
-| `marginX`, `marginY` | Distance in pixels from the screen edge. The bar's exclusive zone is respected on top of this.        |
-| `scale`        | Size multiplier, 0.5 to 3. The widget is 300 px wide at scale 1.                                           |
+| `visible`      | Master switch. Written by `show`, `hide`, and `toggle`.                                                    |
+| `scale`        | Size multiplier, 0.5 to 3. Widgets are 300 px wide at scale 1.                                             |
 | `interval`     | Seconds between samples, minimum 0.5.                                                                      |
+| `marginX`, `marginY` | Distance in pixels from the screen edge. The bar's exclusive zone is respected on top of this.        |
 | `screen`       | Connector name such as `eDP-1` or `DP-1` to show on one screen only. Empty means every screen.             |
-| `visible`      | Written by `show`, `hide`, and `toggle`; set it by hand if you prefer.                                     |
-| `tiles`        | Which tiles to draw, in any subset of `cpu`, `gpu`, `mem`, `thermal`, `disk`, `net`. GPU and MEMORY share a row and widen to fill it when the other is absent. |
-| `sensors`      | Restrict the THERMAL rows to these ids: `cpu`, `gpu`, `nvme`, `mem`, `wifi`, `ambient`, `battery`. Empty shows every sensor the machine reports. |
 | `tileAlpha`    | Tile opacity, 0 to 1. Tiles are opaque by default because that is how Nothing draws them.                  |
-| `clickCommand` | Shell command run on click. Empty disables the click.                                                      |
+
+Per-widget keys (`scale`, `marginX`, `marginY`, `screen`, and `tileAlpha` may
+also be set here to override the shared value for one widget):
+
+| Key            | Widget   | Meaning                                                                                          |
+|----------------|----------|--------------------------------------------------------------------------------------------------|
+| `visible`      | both     | Written by `showWidget`, `hideWidget`, and `toggleWidget`.                                       |
+| `position`     | both     | `top-left`, `top`, `top-right`, `left`, `center`, `right`, `bottom-left`, `bottom`, `bottom-right`. Widgets given the same position stack vertically in that corner. |
+| `clickCommand` | both     | Shell command run on click. Empty disables the click.                                            |
+| `tiles`        | monitor  | Which tiles to draw, in any subset of `cpu`, `gpu`, `mem`, `thermal`, `disk`, `net`. GPU and MEMORY share a row and widen to fill it when the other is absent. |
+| `sensors`      | monitor  | Restrict the THERMAL rows to these ids: `cpu`, `gpu`, `nvme`, `mem`, `wifi`, `ambient`, `battery`. Empty shows every sensor the machine reports. |
+| `lowAt`        | battery  | Percent at which the battery tile turns red while discharging.                                   |
+
+For compatibility the monitor also reads `position`, `tiles`, `sensors`, and
+`clickCommand` from the top level of the entry.
 
 The shell picks up changes to `shell.json` live.
 
@@ -127,11 +167,14 @@ stream. It costs about 40 ms of CPU per sample and spawns no subprocesses
 except `nvidia-smi`, and that only while the dGPU is awake.
 
 `Desktop.qml` is the plugin's service entry point. It owns the collector,
-restarts it with backoff if it exits, exposes the IPC target, and creates one
-layer-shell window per screen on the `bottom` layer with a zero exclusive
-zone. `widgets/SystemMonitor.qml` lays out the tiles, and `components/`
-holds the dot-matrix primitives: `DotText` (a 5x7 dot font), `DotRing`,
-`DotBar`, `DotMatrix`, and the `Tile` frame.
+restarts it with backoff if it exits, exposes the IPC target, and creates
+the layer-shell windows on the `bottom` layer with a zero exclusive zone:
+one per screen and corner that has a widget, with widgets that share a
+corner stacked. `widgets/SystemMonitor.qml` and `widgets/Battery.qml` lay
+out the tiles, and `components/` holds the shared parts: `Palette` (theme
+derived colours), `Tile` (the frame), and the dot-matrix primitives
+`DotText` (a 5x7 dot font), `DotRing`, `DotBar`, `DotMatrix`, and
+`RingGauge`.
 
 If the collector stops delivering samples, the LED goes hollow and the dots
 dim to grey rather than freezing on stale numbers.
@@ -155,6 +198,9 @@ Two things to know when editing:
   flicker.
 - `omarchy-shell nothing-widgets snapshot /path/out.png` renders the widget
   off-screen, so you can check a layout without switching workspaces.
+- `omarchy-shell nothing-widgets debug` dumps each window's size, visibility,
+  and widget slots, which is the first thing to look at when a window does
+  not appear.
 
 Run the collector by hand to see the raw data:
 
