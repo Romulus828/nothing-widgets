@@ -12,9 +12,8 @@ ticked.
       Omarchy reminder takes over the tile with a draining ring.
 - [x] **Media.** Follows Omarchy's media service; album art as a dot
       raster, title, artist, progress bar and times.
-- [ ] **Weather.** Omarchy's bar has a weather widget with a data source to
-      reuse. Temperature as the hero numeral, a dot bar for the day's high and
-      low, a row of conditions per hour.
+- [x] **Weather.** open-meteo at the bar widget's stored location; hero
+      temperature, condition glyph, four-day forecast. Hourly strip still open.
 - [ ] **Calendar.** A month as a 7-column dot grid with today as the red LED
       and past days dimmed. Small and quiet, good for stacking under the
       battery.

@@ -6,6 +6,7 @@ import qs.Commons
 import qs.Ui
 import "widgets"
 import "components/Format.js" as F
+import "components/Weather.js" as W
 
 // Service root for the Nothing desktop widgets. The shell instantiates this
 // once at startup and injects `shell` / `manifest`. It owns:
@@ -40,7 +41,7 @@ Item {
   // monitor also reads its keys (position, tiles, sensors, clickCommand) from
   // the top level.
 
-  readonly property var widgetTypes: ["monitor", "battery", "clock", "media"]
+  readonly property var widgetTypes: ["monitor", "battery", "clock", "media", "weather"]
 
   readonly property var sharedDefaults: ({
     marginX: 16,
@@ -78,6 +79,13 @@ Item {
       visible: true,
       position: "top-right",   // stacks under the clock
       hideWhenIdle: true,      // no tile while nothing is loaded in any player
+      clickCommand: ""
+    },
+    weather: {
+      visible: true,
+      position: "top",         // its own column, between the two stacks
+      unit: "",                // "" = follow the bar's weather widget (else locale), "metric", "imperial"
+      refreshMinutes: 15,
       clickCommand: ""
     }
   })
@@ -305,6 +313,113 @@ Item {
     return Qt.locale().timeFormat(Locale.ShortFormat).indexOf("AP") !== -1 ? "12h" : "24h"
   }
 
+  // ------------------------------------------------------------- weather
+  //
+  // open-meteo, at the coordinates Omarchy's bar weather widget stores in
+  // ~/.local/state/omarchy/settings/weather.json (set through its popup), so
+  // the tile and the bar always describe the same place.
+
+  property var weatherLocation: ({ name: "", latitude: null, longitude: null })
+  property var weather: null              // W.summarize() of the last good report
+  property double weatherFetchedAt: 0
+  property string weatherError: ""
+  readonly property bool weatherWanted: shown && widgetVisible("weather")
+  readonly property bool weatherHasLocation: weatherLocation.latitude !== null && weatherLocation.longitude !== null
+  readonly property string weatherPlace: String(weatherLocation.name || "")
+  readonly property int weatherRefreshMinutes: Math.max(5, Math.round(Number(widgetSetting("weather", "refreshMinutes")) || 15))
+  readonly property bool weatherStale: weatherFetchedAt === 0 || (Date.now() - weatherFetchedAt) > weatherRefreshMinutes * 60000 * 3
+
+  // Unit: this plugin's setting, else the bar weather widget's, else locale.
+  readonly property bool weatherImperial: {
+    var own = String(widgetSetting("weather", "unit") || "")
+    if (own) return W.useImperial(own, Qt.locale().name)
+    var cfg = shell ? shell.shellConfig : null
+    var layout = Util.isPlainObject(cfg) && Util.isPlainObject(cfg.bar) && Util.isPlainObject(cfg.bar.layout) ? cfg.bar.layout : null
+    var barUnit = ""
+    if (layout) {
+      var sections = ["left", "center", "right"]
+      for (var i = 0; i < sections.length && !barUnit; i++) {
+        var items = layout[sections[i]]
+        if (!Array.isArray(items)) continue
+        for (var j = 0; j < items.length; j++) {
+          var w = items[j]
+          if (Util.isPlainObject(w) && w.id === "omarchy.weather" && w.unit) { barUnit = String(w.unit); break }
+        }
+      }
+    }
+    return W.useImperial(barUnit, Qt.locale().name)
+  }
+
+  FileView {
+    id: weatherLocationFile
+    path: Quickshell.env("HOME") + "/.local/state/omarchy/settings/weather.json"
+    watchChanges: true
+    printErrors: false
+    onFileChanged: reload()
+    onLoaded: root.weatherLocation = W.parseLocation(text())
+    onLoadFailed: root.weatherLocation = W.parseLocation("")
+  }
+
+  // The first read can race shell startup; one delayed reload self-corrects.
+  Timer {
+    interval: 1500
+    running: true
+    onTriggered: weatherLocationFile.reload()
+  }
+
+  Process {
+    id: weatherFetch
+    stdout: StdioCollector {
+      onStreamFinished: root.ingestWeather(text)
+    }
+    onExited: function(code) {
+      if (code !== 0) {
+        root.weatherError = "fetch failed (" + code + ")"
+        root.weatherFetchedAtChanged()
+      }
+    }
+  }
+
+  Timer {
+    interval: root.weatherRefreshMinutes * 60000
+    running: root.weatherWanted && root.weatherHasLocation
+    repeat: true
+    triggeredOnStart: true
+    onTriggered: root.refreshWeather()
+  }
+
+  // Re-evaluate staleness without a fetch.
+  Timer {
+    interval: 60000
+    running: root.weatherWanted
+    repeat: true
+    onTriggered: root.weatherFetchedAtChanged()
+  }
+
+  onWeatherHasLocationChanged: if (weatherHasLocation) refreshWeather()
+  onWeatherLocationChanged: if (weatherHasLocation && weatherWanted) refreshWeather()
+  onWeatherImperialChanged: if (weatherHasLocation && weatherWanted) refreshWeather()
+
+  function refreshWeather() {
+    if (!weatherWanted || !weatherHasLocation || weatherFetch.running) return
+    var url = W.forecastUrl(weatherLocation.latitude, weatherLocation.longitude, weatherImperial)
+    weatherFetch.command = ["curl", "-fsS", "--max-time", "8", url]
+    weatherFetch.running = true
+  }
+
+  function ingestWeather(text) {
+    try {
+      var obj = JSON.parse(String(text || "").trim() || "{}")
+      var summary = W.summarize(obj)
+      if (!summary) { weatherError = obj && obj.reason ? String(obj.reason) : "empty report"; return }
+      weather = summary
+      weatherFetchedAt = Date.now()
+      weatherError = ""
+    } catch (e) {
+      weatherError = "bad report: " + e
+    }
+  }
+
   // ------------------------------------------------------------- media
   //
   // Omarchy's media service (omarchy.media) already decides which MPRIS
@@ -493,7 +608,12 @@ Item {
       root.setWidgetShown(name, next)
       return next ? "shown" : "hidden"
     }
-    function refresh(): string { root.restartCollector(); root.refreshReminders(); return "ok" }
+    function refresh(): string { root.restartCollector(); root.refreshReminders(); root.refreshWeather(); return "ok" }
+    function weather(): string {
+      return JSON.stringify({ place: root.weatherPlace, hasLocation: root.weatherHasLocation, imperial: root.weatherImperial,
+                              fetchedAgoMs: root.weatherFetchedAt ? Date.now() - root.weatherFetchedAt : null,
+                              stale: root.weatherStale, error: root.weatherError, report: root.weather })
+    }
     function reminders(): string { root.refreshReminders(); return JSON.stringify(root.reminders) }
     // Timer: `timer 25m` | `timer 10:00` | `timer 1h30m` | `timer pause` | `timer resume` | `timer toggle` | `timer stop` | `timer status`
     function timer(spec: string): string {
@@ -667,18 +787,23 @@ Item {
         readonly property bool batteryOn: batterySlot.active && batterySlot.item !== null && batterySlot.item.wanted
         readonly property bool clockOn: clockSlot.active && clockSlot.item !== null && clockSlot.item.wanted
         readonly property bool mediaOn: mediaSlot.active && mediaSlot.item !== null && mediaSlot.item.wanted
+        readonly property bool weatherOn: weatherSlot.active && weatherSlot.item !== null && weatherSlot.item.wanted
         readonly property real monitorH: monitorOn ? monitorSlot.implicitHeight : 0
         readonly property real batteryH: batteryOn ? batterySlot.implicitHeight : 0
         readonly property real clockH: clockOn ? clockSlot.implicitHeight : 0
         readonly property real mediaH: mediaOn ? mediaSlot.implicitHeight : 0
-        // Stack order is monitor, battery, clock, media; each slot starts
-        // after the visible ones above it.
+        readonly property real weatherH: weatherOn ? weatherSlot.implicitHeight : 0
+        // Stack order is monitor, battery, clock, media, weather; each slot
+        // starts after the visible ones above it.
         readonly property real batteryY: monitorH > 0 ? monitorH + gutter : 0
         readonly property real clockY: batteryY + (batteryH > 0 ? batteryH + gutter : 0)
         readonly property real mediaY: clockY + (clockH > 0 ? clockH + gutter : 0)
+        readonly property real weatherY: mediaY + (mediaH > 0 ? mediaH + gutter : 0)
         implicitWidth: Math.max(monitorOn ? monitorSlot.implicitWidth : 0, batteryOn ? batterySlot.implicitWidth : 0,
-                                clockOn ? clockSlot.implicitWidth : 0, mediaOn ? mediaSlot.implicitWidth : 0)
+                                clockOn ? clockSlot.implicitWidth : 0, mediaOn ? mediaSlot.implicitWidth : 0,
+                                weatherOn ? weatherSlot.implicitWidth : 0)
         implicitHeight: {
+          if (weatherH > 0) return weatherY + weatherH
           if (mediaH > 0) return mediaY + mediaH
           if (clockH > 0) return clockY + clockH
           if (batteryH > 0) return batteryY + batteryH
@@ -695,7 +820,7 @@ Item {
                      item: k.item ? { wanted: k.item.wanted, ih: k.item.implicitHeight, info: k.item.debugInfo !== undefined ? k.item.debugInfo : null } : null }
           }
           return { pos: windowPosition, w: width, h: height, winVisible: win.visible, wanted: win.wanted,
-                   monitor: slot(monitorSlot), battery: slot(batterySlot), clock: slot(clockSlot), media: slot(mediaSlot) }
+                   monitor: slot(monitorSlot), battery: slot(batterySlot), clock: slot(clockSlot), media: slot(mediaSlot), weather: slot(weatherSlot) }
         }
 
         Loader {
@@ -756,6 +881,19 @@ Item {
             tileAlpha: root.widgetAlpha("media")
             hideWhenIdle: root.widgetSetting("media", "hideWhenIdle") !== false
             clickCommand: String(root.widgetSetting("media", "clickCommand") || "")
+          }
+        }
+
+        Loader {
+          id: weatherSlot
+          y: content.weatherY
+          active: win.hasWidget("weather")
+          visible: content.weatherOn
+          sourceComponent: Weather {
+            host: root
+            scale: root.widgetScale("weather")
+            tileAlpha: root.widgetAlpha("weather")
+            clickCommand: String(root.widgetSetting("weather", "clickCommand") || "")
           }
         }
       }

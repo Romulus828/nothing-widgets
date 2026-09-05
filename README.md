@@ -3,8 +3,8 @@
 Desktop widgets for [Omarchy](https://omarchy.org) in the design language of
 Nothing OS: black material, dot-matrix numerals, hairline tiles, and one red
 LED. They sit on the desktop layer, above the wallpaper and below your
-windows. Four widgets so far: a system monitor, a battery tile, a clock
-that doubles as a timer, and a media tile.
+windows. Five widgets so far: a system monitor, a battery tile, a clock
+that doubles as a timer, a media tile, and weather.
 
 <p align="center">
   <img src="docs/system-monitor.png" width="300" alt="System monitor widget">
@@ -13,6 +13,7 @@ that doubles as a timer, and a media tile.
   <img src="docs/timer.png" width="300" alt="Clock widget in timer mode"><br>
   <img src="docs/reminder.png" width="300" alt="Clock widget counting down to an Omarchy reminder">
   <img src="docs/media.png" width="300" alt="Media widget">
+  <img src="docs/weather.png" width="300" alt="Weather widget">
 </p>
 
 ## System monitor
@@ -64,6 +65,7 @@ omarchy-shell nothing-widgets timer resume    # or `timer toggle`
 omarchy-shell nothing-widgets timer stop
 omarchy-shell nothing-widgets timer status    # idle | running 24:59 | paused 24:59 | done
 omarchy-shell nothing-widgets reminders       # JSON list of pending Omarchy reminders
+omarchy-shell nothing-widgets weather         # JSON: place, units, age, last report
 ```
 
 Keybindings make the timer useful. In `~/.config/hypr/bindings.conf`:
@@ -87,6 +89,21 @@ Which player it shows is decided by Omarchy's own media service, the same
 one behind the bar's media widget and the OSD, so the two never disagree.
 Anything that speaks MPRIS works: Spotify, browsers, mpv with `mpv-mpris`,
 and so on. Art comes from whatever the player reports, local file or URL.
+
+## Weather
+
+Current temperature as the hero numeral with a condition glyph, the
+condition and feels-like and wind beneath, and a four-day forecast on the
+right with dot glyphs, highs and lows. The LED lights only for severe
+weather (heavy rain, thunderstorms, hail) and goes hollow while the report
+is stale.
+
+It uses the same location as Omarchy's bar weather widget, read from
+`~/.local/state/omarchy/settings/weather.json`, so set the place once in
+the bar's weather popup and both agree. Units follow the bar widget's
+`unit` setting, else your locale; override with `unit`. Reports come from
+open-meteo every `refreshMinutes`. By default the tile takes the top centre
+of the screen, its own column between the two stacks.
 
 Every grey is derived from the active Omarchy theme's foreground and
 background colours, so the widgets stay coherent on themes other than
@@ -131,7 +148,7 @@ The widget registers an IPC target named `nothing-widgets`:
 omarchy-shell nothing-widgets toggle          # show or hide everything (persisted)
 omarchy-shell nothing-widgets show
 omarchy-shell nothing-widgets hide
-omarchy-shell nothing-widgets toggleWidget battery    # one widget: monitor | battery | clock | media
+omarchy-shell nothing-widgets toggleWidget battery    # one widget: monitor | battery | clock | media | weather
 omarchy-shell nothing-widgets showWidget battery
 omarchy-shell nothing-widgets hideWidget monitor
 omarchy-shell nothing-widgets refresh         # restart the collector now
@@ -197,6 +214,13 @@ optional; the defaults are shown here.
           "position": "top-right",
           "hideWhenIdle": true,
           "clickCommand": ""
+        },
+        "weather": {
+          "visible": true,
+          "position": "top",
+          "unit": "",
+          "refreshMinutes": 15,
+          "clickCommand": ""
         }
       }
     }
@@ -221,13 +245,15 @@ also be set here to override the shared value for one widget):
 | Key            | Widget   | Meaning                                                                                          |
 |----------------|----------|--------------------------------------------------------------------------------------------------|
 | `visible`      | all      | Written by `showWidget`, `hideWidget`, and `toggleWidget`.                                       |
-| `position`     | all      | `top-left`, `top`, `top-right`, `left`, `center`, `right`, `bottom-left`, `bottom`, `bottom-right`. Widgets given the same position stack in that corner in the order monitor, battery, clock, media. |
+| `position`     | all      | `top-left`, `top`, `top-right`, `left`, `center`, `right`, `bottom-left`, `bottom`, `bottom-right`. Widgets given the same position stack in that corner in the order monitor, battery, clock, media, weather. |
 | `clickCommand` | all      | Shell command run on click. Empty disables the click.                                            |
 | `tiles`        | monitor  | Which tiles to draw, in any subset of `cpu`, `gpu`, `mem`, `thermal`, `disk`, `net`. GPU and MEMORY share a row and widen to fill it when the other is absent. |
 | `sensors`      | monitor  | Restrict the THERMAL rows to these ids: `cpu`, `gpu`, `nvme`, `mem`, `wifi`, `ambient`, `battery`. Empty shows every sensor the machine reports. |
 | `lowAt`        | battery  | Percent at which the battery tile turns red while discharging.                                   |
 | `format`       | clock    | `auto` follows the bar's clock widget, else `12h` or `24h`.                                      |
 | `doneCommand`  | clock    | Shell command run when a timer ends. Empty to skip it.                                           |
+| `unit`         | weather  | `metric` or `imperial`. Empty follows the bar's weather widget, else the locale.                   |
+| `refreshMinutes` | weather | Minutes between reports, minimum 5.                                                              |
 | `hideWhenIdle` | media    | Hide the tile while no player has a track loaded. Off shows a "nothing playing" tile.               |
 | `doneSound`    | clock    | `default` plays the bundled beeps, `""` is silent, or give a path to your own sound file. Regenerate the default with `tools/make-sounds.py`. |
 
@@ -250,7 +276,7 @@ restarts it with backoff if it exits, exposes the IPC target, and creates
 the layer-shell windows on the `bottom` layer with a zero exclusive zone:
 one per screen and corner that has a widget, with widgets that share a
 corner stacked. `widgets/SystemMonitor.qml`, `widgets/Battery.qml`, `widgets/Clock.qml`,
-and `widgets/Media.qml` lay out the tiles (timer state lives in
+`widgets/Media.qml`, and `widgets/Weather.qml` lay out the tiles (timer state lives in
 `Desktop.qml` so every screen shows the same countdown), and `components/` holds the shared parts: `Palette` (theme
 derived colours), `Tile` (the frame), and the dot-matrix primitives
 `DotText` (a 5x7 dot font), `DotRing`, `DotBar`, `DotMatrix`, `DotImage`
