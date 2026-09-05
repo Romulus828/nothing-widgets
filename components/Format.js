@@ -147,3 +147,15 @@ function parseDuration(spec) {
   if (!matched || rest.trim() !== "") return NaN
   return total
 }
+
+// Seconds as "1:23" or "1:02:03" (floors; MPRIS gives fractional seconds)
+function clockTime(seconds) {
+  if (!isNum(seconds) || seconds < 0) return "--"
+  var total = Math.floor(seconds)
+  var h = Math.floor(total / 3600)
+  var m = Math.floor((total % 3600) / 60)
+  var s = total % 60
+  var mm = h > 0 && m < 10 ? "0" + m : String(m)
+  var ss = s < 10 ? "0" + s : String(s)
+  return (h > 0 ? h + ":" : "") + mm + ":" + ss
+}

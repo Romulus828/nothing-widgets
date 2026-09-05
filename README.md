@@ -3,8 +3,8 @@
 Desktop widgets for [Omarchy](https://omarchy.org) in the design language of
 Nothing OS: black material, dot-matrix numerals, hairline tiles, and one red
 LED. They sit on the desktop layer, above the wallpaper and below your
-windows. Three widgets so far: a system monitor, a battery tile, and a
-clock that doubles as a timer.
+windows. Four widgets so far: a system monitor, a battery tile, a clock
+that doubles as a timer, and a media tile.
 
 <p align="center">
   <img src="docs/system-monitor.png" width="300" alt="System monitor widget">
@@ -12,6 +12,7 @@ clock that doubles as a timer.
   <img src="docs/clock.png" width="300" alt="Clock widget">
   <img src="docs/timer.png" width="300" alt="Clock widget in timer mode"><br>
   <img src="docs/reminder.png" width="300" alt="Clock widget counting down to an Omarchy reminder">
+  <img src="docs/media.png" width="300" alt="Media widget">
 </p>
 
 ## System monitor
@@ -72,6 +73,21 @@ bindd = SUPER SHIFT, T, Start a 25 minute timer, exec, omarchy-shell nothing-wid
 bindd = SUPER SHIFT, Y, Pause or resume the timer, exec, omarchy-shell nothing-widgets timer toggle
 ```
 
+## Media
+
+Album art as a dot raster, with the title, artist, previous / play-pause /
+next buttons, a dot progress bar and the position and length beside it. The
+LED is the play indicator: lit while playing, hollow while paused. Buttons
+the player can't honour (no playlist, say) are dimmed. Clicking the tile
+away from the buttons also works: left plays or pauses, right skips ahead,
+middle goes back. The tile hides itself when no player has anything loaded,
+unless `hideWhenIdle` is off.
+
+Which player it shows is decided by Omarchy's own media service, the same
+one behind the bar's media widget and the OSD, so the two never disagree.
+Anything that speaks MPRIS works: Spotify, browsers, mpv with `mpv-mpris`,
+and so on. Art comes from whatever the player reports, local file or URL.
+
 Every grey is derived from the active Omarchy theme's foreground and
 background colours, so the widgets stay coherent on themes other than
 Nothing. The accent colour is used only for the live LED and for alerts.
@@ -115,7 +131,7 @@ The widget registers an IPC target named `nothing-widgets`:
 omarchy-shell nothing-widgets toggle          # show or hide everything (persisted)
 omarchy-shell nothing-widgets show
 omarchy-shell nothing-widgets hide
-omarchy-shell nothing-widgets toggleWidget battery    # one widget: monitor | battery | clock
+omarchy-shell nothing-widgets toggleWidget battery    # one widget: monitor | battery | clock | media
 omarchy-shell nothing-widgets showWidget battery
 omarchy-shell nothing-widgets hideWidget monitor
 omarchy-shell nothing-widgets refresh         # restart the collector now
@@ -175,6 +191,12 @@ optional; the defaults are shown here.
           "doneCommand": "notify-send -u critical 'Timer done'",
           "doneSound": "default",
           "clickCommand": ""
+        },
+        "media": {
+          "visible": true,
+          "position": "top-right",
+          "hideWhenIdle": true,
+          "clickCommand": ""
         }
       }
     }
@@ -199,13 +221,14 @@ also be set here to override the shared value for one widget):
 | Key            | Widget   | Meaning                                                                                          |
 |----------------|----------|--------------------------------------------------------------------------------------------------|
 | `visible`      | all      | Written by `showWidget`, `hideWidget`, and `toggleWidget`.                                       |
-| `position`     | all      | `top-left`, `top`, `top-right`, `left`, `center`, `right`, `bottom-left`, `bottom`, `bottom-right`. Widgets given the same position stack in that corner in the order monitor, battery, clock. |
+| `position`     | all      | `top-left`, `top`, `top-right`, `left`, `center`, `right`, `bottom-left`, `bottom`, `bottom-right`. Widgets given the same position stack in that corner in the order monitor, battery, clock, media. |
 | `clickCommand` | all      | Shell command run on click. Empty disables the click.                                            |
 | `tiles`        | monitor  | Which tiles to draw, in any subset of `cpu`, `gpu`, `mem`, `thermal`, `disk`, `net`. GPU and MEMORY share a row and widen to fill it when the other is absent. |
 | `sensors`      | monitor  | Restrict the THERMAL rows to these ids: `cpu`, `gpu`, `nvme`, `mem`, `wifi`, `ambient`, `battery`. Empty shows every sensor the machine reports. |
 | `lowAt`        | battery  | Percent at which the battery tile turns red while discharging.                                   |
 | `format`       | clock    | `auto` follows the bar's clock widget, else `12h` or `24h`.                                      |
 | `doneCommand`  | clock    | Shell command run when a timer ends. Empty to skip it.                                           |
+| `hideWhenIdle` | media    | Hide the tile while no player has a track loaded. Off shows a "nothing playing" tile.               |
 | `doneSound`    | clock    | `default` plays the bundled beeps, `""` is silent, or give a path to your own sound file. Regenerate the default with `tools/make-sounds.py`. |
 
 For compatibility the monitor also reads `position`, `tiles`, `sensors`, and
@@ -226,12 +249,12 @@ except `nvidia-smi`, and that only while the dGPU is awake.
 restarts it with backoff if it exits, exposes the IPC target, and creates
 the layer-shell windows on the `bottom` layer with a zero exclusive zone:
 one per screen and corner that has a widget, with widgets that share a
-corner stacked. `widgets/SystemMonitor.qml`, `widgets/Battery.qml`, and
-`widgets/Clock.qml` lay out the tiles (timer state lives in `Desktop.qml`
-so every screen shows the same countdown), and `components/` holds the shared parts: `Palette` (theme
+corner stacked. `widgets/SystemMonitor.qml`, `widgets/Battery.qml`, `widgets/Clock.qml`,
+and `widgets/Media.qml` lay out the tiles (timer state lives in
+`Desktop.qml` so every screen shows the same countdown), and `components/` holds the shared parts: `Palette` (theme
 derived colours), `Tile` (the frame), and the dot-matrix primitives
-`DotText` (a 5x7 dot font), `DotRing`, `DotBar`, `DotMatrix`, and
-`RingGauge`.
+`DotText` (a 5x7 dot font), `DotRing`, `DotBar`, `DotMatrix`, `DotImage`
+(an image as a dot raster), and `RingGauge`.
 
 If the collector stops delivering samples, the LED goes hollow and the dots
 dim to grey rather than freezing on stale numbers.

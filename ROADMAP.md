@@ -10,9 +10,8 @@ ticked.
 - [x] **Battery.** Charge ring, time left or to full, draw, health, cycles.
 - [x] **Clock and timer.** Dot-matrix time with no seconds; a timer or an
       Omarchy reminder takes over the tile with a draining ring.
-- [ ] **Media.** Quickshell has an MPRIS service, so track, artist, play
-      state and a dot progress bar come for free. Album art as a dithered dot
-      raster would be very on-brand.
+- [x] **Media.** Follows Omarchy's media service; album art as a dot
+      raster, title, artist, progress bar and times.
 - [ ] **Weather.** Omarchy's bar has a weather widget with a data source to
       reuse. Temperature as the hero numeral, a dot bar for the day's high and
       low, a row of conditions per hour.

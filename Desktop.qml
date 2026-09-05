@@ -40,7 +40,7 @@ Item {
   // monitor also reads its keys (position, tiles, sensors, clickCommand) from
   // the top level.
 
-  readonly property var widgetTypes: ["monitor", "battery", "clock"]
+  readonly property var widgetTypes: ["monitor", "battery", "clock", "media"]
 
   readonly property var sharedDefaults: ({
     marginX: 16,
@@ -72,6 +72,12 @@ Item {
       format: "auto",          // auto | 12h | 24h
       doneCommand: "notify-send -u critical 'Timer done'",
       doneSound: "default",    // "default" = sounds/timer.wav, "" = silent, or a path to a wav/ogg
+      clickCommand: ""
+    },
+    media: {
+      visible: true,
+      position: "top-right",   // stacks under the clock
+      hideWhenIdle: true,      // no tile while nothing is loaded in any player
       clickCommand: ""
     }
   })
@@ -297,6 +303,26 @@ Item {
       }
     }
     return Qt.locale().timeFormat(Locale.ShortFormat).indexOf("AP") !== -1 ? "12h" : "24h"
+  }
+
+  // ------------------------------------------------------------- media
+  //
+  // Omarchy's media service (omarchy.media) already decides which MPRIS
+  // player is "the" player for the bar and OSD; the media tile follows it.
+  // Services load in no particular order, so look it up until it appears.
+
+  property var mediaService: null
+  Timer {
+    interval: 2000
+    running: root.mediaService === null && root.widgetVisible("media")
+    repeat: true
+    triggeredOnStart: true
+    onTriggered: {
+      if (shell && typeof shell.serviceFor === "function") {
+        var svc = shell.serviceFor("omarchy.media")
+        if (svc) root.mediaService = svc
+      }
+    }
   }
 
   // ------------------------------------------------------------- reminders
@@ -640,15 +666,24 @@ Item {
         readonly property bool monitorOn: monitorSlot.active && monitorSlot.item !== null && monitorSlot.item.wanted
         readonly property bool batteryOn: batterySlot.active && batterySlot.item !== null && batterySlot.item.wanted
         readonly property bool clockOn: clockSlot.active && clockSlot.item !== null && clockSlot.item.wanted
+        readonly property bool mediaOn: mediaSlot.active && mediaSlot.item !== null && mediaSlot.item.wanted
         readonly property real monitorH: monitorOn ? monitorSlot.implicitHeight : 0
         readonly property real batteryH: batteryOn ? batterySlot.implicitHeight : 0
         readonly property real clockH: clockOn ? clockSlot.implicitHeight : 0
-        // Stack order is monitor, battery, clock; each slot starts after the
-        // visible ones above it.
+        readonly property real mediaH: mediaOn ? mediaSlot.implicitHeight : 0
+        // Stack order is monitor, battery, clock, media; each slot starts
+        // after the visible ones above it.
         readonly property real batteryY: monitorH > 0 ? monitorH + gutter : 0
         readonly property real clockY: batteryY + (batteryH > 0 ? batteryH + gutter : 0)
-        implicitWidth: Math.max(monitorOn ? monitorSlot.implicitWidth : 0, batteryOn ? batterySlot.implicitWidth : 0, clockOn ? clockSlot.implicitWidth : 0)
-        implicitHeight: clockH > 0 ? clockY + clockH : (batteryH > 0 ? batteryY + batteryH : monitorH)
+        readonly property real mediaY: clockY + (clockH > 0 ? clockH + gutter : 0)
+        implicitWidth: Math.max(monitorOn ? monitorSlot.implicitWidth : 0, batteryOn ? batterySlot.implicitWidth : 0,
+                                clockOn ? clockSlot.implicitWidth : 0, mediaOn ? mediaSlot.implicitWidth : 0)
+        implicitHeight: {
+          if (mediaH > 0) return mediaY + mediaH
+          if (clockH > 0) return clockY + clockH
+          if (batteryH > 0) return batteryY + batteryH
+          return monitorH
+        }
         width: implicitWidth
         height: implicitHeight
         Component.onCompleted: root.registerContent(content)
@@ -657,10 +692,10 @@ Item {
         function describe() {
           function slot(k) {
             return { active: k.active, visible: k.visible, y: k.y, ih: k.implicitHeight,
-                     item: k.item ? { wanted: k.item.wanted, ih: k.item.implicitHeight } : null }
+                     item: k.item ? { wanted: k.item.wanted, ih: k.item.implicitHeight, info: k.item.debugInfo !== undefined ? k.item.debugInfo : null } : null }
           }
           return { pos: windowPosition, w: width, h: height, winVisible: win.visible, wanted: win.wanted,
-                   monitor: slot(monitorSlot), battery: slot(batterySlot), clock: slot(clockSlot) }
+                   monitor: slot(monitorSlot), battery: slot(batterySlot), clock: slot(clockSlot), media: slot(mediaSlot) }
         }
 
         Loader {
@@ -707,6 +742,20 @@ Item {
             tileAlpha: root.widgetAlpha("clock")
             format: root.clockFormat
             clickCommand: String(root.widgetSetting("clock", "clickCommand") || "")
+          }
+        }
+
+        Loader {
+          id: mediaSlot
+          y: content.mediaY
+          active: win.hasWidget("media")
+          visible: content.mediaOn
+          sourceComponent: Media {
+            host: root
+            scale: root.widgetScale("media")
+            tileAlpha: root.widgetAlpha("media")
+            hideWhenIdle: root.widgetSetting("media", "hideWhenIdle") !== false
+            clickCommand: String(root.widgetSetting("media", "clickCommand") || "")
           }
         }
       }
