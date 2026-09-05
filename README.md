@@ -39,8 +39,9 @@ One tile with two modes. As a clock it shows the time in big dot numerals
 with the date underneath, and nothing that moves: no seconds, one repaint a
 minute. Start a timer and the countdown takes the hero, a dot ring drains
 beside it, the current time moves to the trailing text, and the LED lights.
-When the timer ends the numerals turn red, the LED blinks, and `doneCommand`
-runs (a critical `notify-send` by default). The finished timer is dismissed
+When the timer ends the numerals turn red, the LED blinks, three beeps play
+(`sounds/timer.wav`, through PipeWire, PulseAudio, or ALSA, whichever is
+there), and `doneCommand` runs (a critical `notify-send` by default). The finished timer is dismissed
 by a click or on its own after two minutes.
 
 Left click pauses or resumes a running timer; right click cancels it. The
@@ -172,6 +173,7 @@ optional; the defaults are shown here.
           "position": "top-right",
           "format": "auto",
           "doneCommand": "notify-send -u critical 'Timer done'",
+          "doneSound": "default",
           "clickCommand": ""
         }
       }
@@ -203,7 +205,8 @@ also be set here to override the shared value for one widget):
 | `sensors`      | monitor  | Restrict the THERMAL rows to these ids: `cpu`, `gpu`, `nvme`, `mem`, `wifi`, `ambient`, `battery`. Empty shows every sensor the machine reports. |
 | `lowAt`        | battery  | Percent at which the battery tile turns red while discharging.                                   |
 | `format`       | clock    | `auto` follows the bar's clock widget, else `12h` or `24h`.                                      |
-| `doneCommand`  | clock    | Shell command run when a timer ends. Empty for silence.                                          |
+| `doneCommand`  | clock    | Shell command run when a timer ends. Empty to skip it.                                           |
+| `doneSound`    | clock    | `default` plays the bundled beeps, `""` is silent, or give a path to your own sound file. Regenerate the default with `tools/make-sounds.py`. |
 
 For compatibility the monitor also reads `position`, `tiles`, `sensors`, and
 `clickCommand` from the top level of the entry.

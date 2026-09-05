@@ -71,6 +71,7 @@ Item {
       position: "top-right",   // stacks under the battery
       format: "auto",          // auto | 12h | 24h
       doneCommand: "notify-send -u critical 'Timer done'",
+      doneSound: "default",    // "default" = sounds/timer.wav, "" = silent, or a path to a wav/ogg
       clickCommand: ""
     }
   })
@@ -227,7 +228,19 @@ Item {
     timerDismiss.restart()
     var cmd = String(widgetSetting("clock", "doneCommand") || "")
     if (cmd) Util.execDetached(cmd)
+    playDoneSound()
     timerPersist()
+  }
+
+  // Three beeps through whichever player the machine has. The default file
+  // ships with the plugin; a custom path or "" replaces or silences it.
+  function playDoneSound() {
+    var snd = String(widgetSetting("clock", "doneSound"))
+    if (snd === "" || snd === "none" || snd === "false") return
+    var path = snd === "default" || snd === "true" ? sourceDir + "/sounds/timer.wav" : snd
+    Quickshell.execDetached(["bash", "-c",
+      'pw-play "$1" 2>/dev/null || paplay "$1" 2>/dev/null || aplay -q "$1" 2>/dev/null || ffplay -nodisp -autoexit -loglevel quiet "$1"',
+      "bash", path])
   }
 
   function timerPersist() {
