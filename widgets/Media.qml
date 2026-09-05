@@ -5,7 +5,8 @@ import qs.Commons
 import "../components"
 import "../components/Format.js" as F
 
-// The media widget: one 300 x 146 tile. Album art as a dot raster on the
+// The media widget: one 300 x 172 tile, a little taller than the others so
+// a two-line title, the artist, the buttons and the bar never collide. Album art as a dot raster on the
 // left; title, artist, a dot progress bar and times on the right. Follows
 // Omarchy's own media service (omarchy.media) for which player is active,
 // so it agrees with the bar and the OSD; falls back to MPRIS directly.
@@ -26,7 +27,7 @@ Item {
 
   function u(px) { return Math.round(px * scale) }
   readonly property real widgetWidth: u(300)
-  readonly property real tileH: u(146)
+  readonly property real tileH: u(172)
 
   // ----------------------------------------------------------- player
 
@@ -198,7 +199,7 @@ Item {
         id: transport
         anchors.horizontalCenter: parent.horizontalCenter
         anchors.bottom: bar.top
-        anchors.bottomMargin: root.u(2)
+        anchors.bottomMargin: root.u(4)
         spacing: root.u(10)
         TransportButton { glyph: "\u23EE"; enabled: root.canPrev; onPressed: root.act("previous") }
         TransportButton { glyph: root.playing ? "\u23F8" : "\u25B6"; enabled: root.canToggle; emphasis: true; onPressed: root.act("playPause") }

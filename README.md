@@ -75,7 +75,7 @@ bindd = SUPER SHIFT, Y, Pause or resume the timer, exec, omarchy-shell nothing-w
 
 ## Media
 
-Album art as a dot raster, with the title, artist, previous / play-pause /
+A slightly taller tile. Album art as a dot raster, with the title, artist, previous / play-pause /
 next buttons, a dot progress bar and the position and length beside it. The
 LED is the play indicator: lit while playing, hollow while paused. Buttons
 the player can't honour (no playlist, say) are dimmed. Clicking the tile
