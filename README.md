@@ -131,6 +131,7 @@ the manifest, and asks whether to enable it. Later updates:
 
 ```sh
 omarchy plugin update io.github.romulus828.nothing-widgets
+sleep 3 && omarchy restart shell    # QML changes need a restart; the pause avoids a Quickshell exit crash
 ```
 
 To turn it off or remove it:
@@ -301,7 +302,10 @@ Two things to know when editing:
 - Saving a file inside the installed plugin folder triggers a plugin reload,
   but the shell's QML component cache keeps serving the old code. After QML
   changes run `omarchy restart shell`, which costs about a second of bar
-  flicker.
+  flicker. Give the reload a few seconds to settle first: restarting the
+  shell while a reload is still creating objects can crash Quickshell 0.3.1
+  on exit (it relaunches itself, but shows a crash dialog). This applies to
+  `omarchy plugin update` too, since it writes the same files.
 - `omarchy-shell nothing-widgets snapshot /path/out.png` renders the widget
   off-screen, so you can check a layout without switching workspaces.
 - `omarchy-shell nothing-widgets debug` dumps each window's size, visibility,
