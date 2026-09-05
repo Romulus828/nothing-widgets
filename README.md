@@ -159,7 +159,7 @@ Two things to know when editing:
 Run the collector by hand to see the raw data:
 
 ```sh
-python3 collector.py --once | python3 -m json.tool
+python3 collector.py --once | tail -n 1 | python3 -m json.tool   # --once emits two samples so rates are valid
 ```
 
 Validate the manifest before committing:
