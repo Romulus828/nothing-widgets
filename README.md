@@ -10,7 +10,8 @@ clock that doubles as a timer.
   <img src="docs/system-monitor.png" width="300" alt="System monitor widget">
   <img src="docs/battery.png" width="300" alt="Battery widget"><br>
   <img src="docs/clock.png" width="300" alt="Clock widget">
-  <img src="docs/timer.png" width="300" alt="Clock widget in timer mode">
+  <img src="docs/timer.png" width="300" alt="Clock widget in timer mode"><br>
+  <img src="docs/reminder.png" width="300" alt="Clock widget counting down to an Omarchy reminder">
 </p>
 
 ## System monitor
@@ -46,12 +47,21 @@ Left click pauses or resumes a running timer; right click cancels it. The
 hour format follows the bar's clock widget unless you set `format`. A
 running timer survives a shell restart.
 
+**Omarchy reminders show here too.** Set one the usual way, with
+`SUPER+CTRL+R`, `omarchy reminder 25 "Tea"`, or the reminders overlay, and
+the tile counts down to it with the message as the caption, the LED
+hollow until the final minute. When it fires, Omarchy sends its notification
+and the tile returns to the clock. With several reminders pending the tile
+shows the soonest and a `+N`. A manual timer takes priority over reminders
+while it runs.
+
 ```sh
 omarchy-shell nothing-widgets timer 25m       # also 90s, 1h30m, 1h30, 10:00, 1:30:00, or a bare 25 (minutes)
 omarchy-shell nothing-widgets timer pause
 omarchy-shell nothing-widgets timer resume    # or `timer toggle`
 omarchy-shell nothing-widgets timer stop
 omarchy-shell nothing-widgets timer status    # idle | running 24:59 | paused 24:59 | done
+omarchy-shell nothing-widgets reminders       # JSON list of pending Omarchy reminders
 ```
 
 Keybindings make the timer useful. In `~/.config/hypr/bindings.conf`:

@@ -9,6 +9,8 @@ import "../components/Format.js" as F
 //          a minute and the desktop stays still
 //   timer  the remaining time takes the hero, a dot ring drains beside it,
 //          the clock moves to the trailing text and the LED lights up
+// An Omarchy reminder (omarchy reminder 25 "Tea") shows the same way, with
+// its message as the caption, whenever no manual timer is running.
 // Timer state lives in the host (Desktop.qml) so every screen shows the
 // same countdown and IPC can drive it.
 Item {
@@ -19,6 +21,8 @@ Item {
   property real tileAlpha: 1.0
   property string clickCommand: ""  // run on click in clock mode; empty = nothing
   property string format: "auto"    // auto | 12h | 24h
+  property var reminder: null       // next Omarchy reminder {label, minutes, at} or null
+  property int reminderCount: 0
 
   Palette { id: pal; tileAlpha: root.tileAlpha }
 
@@ -68,6 +72,24 @@ Item {
     return "ends " + Qt.formatTime(d, twelveHour ? "h:mm AP" : "HH:mm")
   }
 
+  // ----------------------------------------------------------- reminder
+
+  readonly property bool reminderActive: !timerActive && reminder !== null && reminder.at > now.getTime()
+  readonly property real reminderRemainingMs: reminderActive ? reminder.at - now.getTime() : 0
+  readonly property real reminderFraction: reminderActive && reminder.minutes > 0 ? F.clamp01(reminderRemainingMs / (reminder.minutes * 60000)) : 0
+  readonly property string reminderCaption: {
+    if (!reminderActive) return ""
+    var text = String(reminder.label || "reminder")
+    if (reminderCount > 1) text += "  +" + (reminderCount - 1)
+    return text
+  }
+  // Ask the host for a fresh list the moment a reminder fires.
+  onReminderRemainingMsChanged: if (reminder !== null && !reminderActive && host) host.refreshReminders()
+
+  // Which face is showing
+  readonly property bool countdown: timerActive || reminderActive
+  readonly property string heroText: timerActive ? remainingText : F.countdown(reminderRemainingMs)
+
   // The LED blinks while a finished timer waits to be dismissed.
   property bool blink: false
   Timer {
@@ -115,19 +137,23 @@ Item {
     ledOffColor: pal.dotOff
     ledHollowColor: pal.tertiary
     fontFamily: pal.fontFamily
-    label: root.timerActive ? "timer" : "clock"
+    label: root.timerActive ? "timer" : (root.reminderActive ? "reminder" : "clock")
     led: {
-      if (!root.timerActive) return "off"
-      if (root.timerDone) return root.blink ? "on" : "off"
-      return root.timerPaused ? "hollow" : "on"
+      if (root.timerActive) {
+        if (root.timerDone) return root.blink ? "on" : "off"
+        return root.timerPaused ? "hollow" : "on"
+      }
+      // a reminder waits quietly and lights up for its final minute
+      if (root.reminderActive) return root.reminderRemainingMs <= 60000 ? "on" : "hollow"
+      return "off"
     }
-    trailing: root.timerActive ? root.clockLine : ""
+    trailing: root.countdown ? root.clockLine : ""
     trailingColor: pal.labelColor
 
     // ---- clock mode
     DotText {
       id: clockHero
-      visible: !root.timerActive
+      visible: !root.countdown
       anchors.left: parent.left
       anchors.top: parent.top
       text: root.timeText
@@ -136,7 +162,7 @@ Item {
       color: pal.dotOn
     }
     Text {
-      visible: !root.timerActive && root.meridiem !== ""
+      visible: !root.countdown && root.meridiem !== ""
       anchors.left: clockHero.right
       anchors.leftMargin: root.u(8)
       anchors.baseline: clockHero.bottom
@@ -149,39 +175,47 @@ Item {
       renderType: Text.NativeRendering
     }
     Caption {
-      visible: !root.timerActive
+      visible: !root.countdown
       anchors.left: parent.left
       anchors.bottom: parent.bottom
       text: root.dateText
     }
 
-    // ---- timer mode
+    // ---- timer / reminder mode
     DotText {
       id: timerHero
-      visible: root.timerActive
+      visible: root.countdown
       anchors.left: parent.left
       anchors.top: parent.top
-      text: root.remainingText
+      text: root.heroText
       // m:ss fits beside the ring at 6 px; h:mm:ss drops to 4 px
-      pitch: root.remainingText.length >= 7 ? root.u(4) : root.u(6)
+      pitch: root.heroText.length >= 7 ? root.u(4) : root.u(6)
       weight: 0.39
       color: root.timerPaused ? pal.tertiary : (root.timerDone ? pal.accent : pal.dotOn)
     }
     Caption {
-      visible: root.timerActive
+      visible: root.countdown
       anchors.left: parent.left
+      anchors.right: ring.left
+      anchors.rightMargin: root.u(8)
       anchors.bottom: parent.bottom
-      text: root.timerDone ? "done · click to dismiss" : (root.timerPaused ? "paused" : root.endsText)
+      elide: Text.ElideRight
+      text: {
+        if (!root.timerActive) return root.reminderCaption
+        if (root.timerDone) return "done · click to dismiss"
+        return root.timerPaused ? "paused" : root.endsText
+      }
       color: root.timerDone ? pal.redText : pal.labelColor
     }
     DotRing {
-      visible: root.timerActive
+      id: ring
+      visible: root.countdown
       anchors.right: parent.right
       anchors.top: parent.top
       anchors.topMargin: root.u(1)
       width: root.u(88)
       height: root.u(88)
-      value: root.timerDone ? 0 : root.fraction
+      value: root.timerActive ? (root.timerDone ? 0 : root.fraction) : root.reminderFraction
       count: 36
       dotRadius: Math.max(1.5, 2.0 * root.scale)
       headRadius: Math.max(2, 2.75 * root.scale)

@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "io.github.romulus828.nothing-widgets",
   "name": "Nothing Widgets",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "author": "Romulus828",
   "license": "MIT",
   "description": "Desktop widgets in the Nothing design language: a dot-matrix system monitor with usage and temperatures, drawn on the desktop layer.",

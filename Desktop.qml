@@ -286,6 +286,67 @@ Item {
     return Qt.locale().timeFormat(Locale.ShortFormat).indexOf("AP") !== -1 ? "12h" : "24h"
   }
 
+  // ------------------------------------------------------------- reminders
+  //
+  // Omarchy reminders (`omarchy reminder 25 "Tea"`, SUPER+CTRL+R) are systemd
+  // user timers. The clock tile counts down to the next one, so this polls
+  // the list while a clock widget is on screen. Manual timers take priority.
+
+  property var reminders: []         // [{unit, label, message, minutes, at}] sorted by `at` (epoch ms)
+  readonly property var nextReminder: reminders.length ? reminders[0] : null
+  readonly property bool clockWanted: shown && widgetVisible("clock")
+
+  Process {
+    id: reminderPoll
+    command: [root.omarchyPath + "/bin/omarchy-reminder", "show", "--json"]
+    stdout: StdioCollector {
+      onStreamFinished: root.ingestReminders(text)
+    }
+  }
+
+  Timer {
+    interval: 5000
+    running: root.clockWanted
+    repeat: true
+    triggeredOnStart: true
+    onTriggered: root.refreshReminders()
+  }
+
+  function refreshReminders() {
+    if (!reminderPoll.running) reminderPoll.running = true
+  }
+
+  function ingestReminders(text) {
+    var out = []
+    try {
+      var obj = JSON.parse(String(text || "").trim() || "{}")
+      var list = Util.isPlainObject(obj) && Array.isArray(obj.reminders) ? obj.reminders : []
+      var now = Date.now()
+      for (var i = 0; i < list.length; i++) {
+        var r = list[i]
+        if (!Util.isPlainObject(r)) continue
+        var at = Number(r.at) * 1000
+        if (!(at > now)) continue
+        out.push({
+          unit: String(r.unit || ""),
+          label: String(r.label || r.message || "reminder"),
+          message: String(r.message || ""),
+          minutes: Number(r.minutes) || 0,
+          at: at
+        })
+      }
+      out.sort(function(a, b) { return a.at - b.at })
+    } catch (e) {
+      console.warn("nothing-widgets: bad reminder list:", e)
+    }
+    // keep the array identity stable unless something changed
+    var same = out.length === reminders.length
+    for (var j = 0; same && j < out.length; j++) {
+      same = out[j].unit === reminders[j].unit && out[j].at === reminders[j].at && out[j].label === reminders[j].label
+    }
+    if (!same) reminders = out
+  }
+
   function timerStatus() {
     if (!timerActive) return "idle"
     if (timerDone) return "done"
@@ -393,7 +454,8 @@ Item {
       root.setWidgetShown(name, next)
       return next ? "shown" : "hidden"
     }
-    function refresh(): string { root.restartCollector(); return "ok" }
+    function refresh(): string { root.restartCollector(); root.refreshReminders(); return "ok" }
+    function reminders(): string { root.refreshReminders(); return JSON.stringify(root.reminders) }
     // Timer: `timer 25m` | `timer 10:00` | `timer 1h30m` | `timer pause` | `timer resume` | `timer toggle` | `timer stop` | `timer status`
     function timer(spec: string): string {
       var s = String(spec || "").trim().toLowerCase()
@@ -428,6 +490,7 @@ Item {
         lastError: root.lastError,
         widgets: widgets,
         timer: root.timerStatus(),
+        reminders: root.reminders.length,
         windows: root.windowModel.map(function(w) { return w.key }),
         screens: Quickshell.screens.map(function(s) { return s.name })
       })
@@ -625,6 +688,8 @@ Item {
           visible: content.clockOn
           sourceComponent: Clock {
             host: root
+            reminder: root.nextReminder
+            reminderCount: root.reminders.length
             scale: root.widgetScale("clock")
             tileAlpha: root.widgetAlpha("clock")
             format: root.clockFormat
