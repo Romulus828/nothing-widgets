@@ -3,11 +3,14 @@
 Desktop widgets for [Omarchy](https://omarchy.org) in the design language of
 Nothing OS: black material, dot-matrix numerals, hairline tiles, and one red
 LED. They sit on the desktop layer, above the wallpaper and below your
-windows. Two widgets so far: a system monitor and a battery tile.
+windows. Three widgets so far: a system monitor, a battery tile, and a
+clock that doubles as a timer.
 
 <p align="center">
   <img src="docs/system-monitor.png" width="300" alt="System monitor widget">
-  <img src="docs/battery.png" width="300" alt="Battery widget">
+  <img src="docs/battery.png" width="300" alt="Battery widget"><br>
+  <img src="docs/clock.png" width="300" alt="Clock widget">
+  <img src="docs/timer.png" width="300" alt="Clock widget in timer mode">
 </p>
 
 ## System monitor
@@ -28,6 +31,35 @@ draw in watts, health as a percentage of design capacity, and the cycle
 count. The trailing text is the pack's current energy in Wh. The LED and
 numerals go red when the charge drops to `lowAt` percent while discharging.
 The tile hides itself on machines without a battery.
+
+## Clock and timer
+
+One tile with two modes. As a clock it shows the time in big dot numerals
+with the date underneath, and nothing that moves: no seconds, one repaint a
+minute. Start a timer and the countdown takes the hero, a dot ring drains
+beside it, the current time moves to the trailing text, and the LED lights.
+When the timer ends the numerals turn red, the LED blinks, and `doneCommand`
+runs (a critical `notify-send` by default). The finished timer is dismissed
+by a click or on its own after two minutes.
+
+Left click pauses or resumes a running timer; right click cancels it. The
+hour format follows the bar's clock widget unless you set `format`. A
+running timer survives a shell restart.
+
+```sh
+omarchy-shell nothing-widgets timer 25m       # also 90s, 1h30m, 1h30, 10:00, 1:30:00, or a bare 25 (minutes)
+omarchy-shell nothing-widgets timer pause
+omarchy-shell nothing-widgets timer resume    # or `timer toggle`
+omarchy-shell nothing-widgets timer stop
+omarchy-shell nothing-widgets timer status    # idle | running 24:59 | paused 24:59 | done
+```
+
+Keybindings make the timer useful. In `~/.config/hypr/bindings.conf`:
+
+```
+bindd = SUPER SHIFT, T, Start a 25 minute timer, exec, omarchy-shell nothing-widgets timer 25m
+bindd = SUPER SHIFT, Y, Pause or resume the timer, exec, omarchy-shell nothing-widgets timer toggle
+```
 
 Every grey is derived from the active Omarchy theme's foreground and
 background colours, so the widgets stay coherent on themes other than
@@ -72,17 +104,19 @@ The widget registers an IPC target named `nothing-widgets`:
 omarchy-shell nothing-widgets toggle          # show or hide everything (persisted)
 omarchy-shell nothing-widgets show
 omarchy-shell nothing-widgets hide
-omarchy-shell nothing-widgets toggleWidget battery    # one widget: monitor | battery
+omarchy-shell nothing-widgets toggleWidget battery    # one widget: monitor | battery | clock
 omarchy-shell nothing-widgets showWidget battery
 omarchy-shell nothing-widgets hideWidget monitor
 omarchy-shell nothing-widgets refresh         # restart the collector now
 omarchy-shell nothing-widgets status          # JSON: shown, collector state, widgets, windows, screens
 omarchy-shell nothing-widgets snapshot ~/w.png              # render the first window to a PNG
 omarchy-shell nothing-widgets snapshotAt ~/b.png top-left   # render the window at a position
+omarchy-shell nothing-widgets timer 25m       # see Clock and timer above
 ```
 
 Clicking a widget runs its `clickCommand` setting. The monitor opens `btop`
-by default; the battery tile does nothing until you give it a command.
+by default; the battery and clock tiles do nothing until you give them a
+command (the clock's clicks control the timer while one is running).
 
 A keybinding for the toggle is a one-liner in `~/.config/hypr/bindings.conf`:
 
@@ -122,6 +156,13 @@ optional; the defaults are shown here.
           "position": "top-right",
           "lowAt": 15,
           "clickCommand": ""
+        },
+        "clock": {
+          "visible": true,
+          "position": "top-right",
+          "format": "auto",
+          "doneCommand": "notify-send -u critical 'Timer done'",
+          "clickCommand": ""
         }
       }
     }
@@ -145,12 +186,14 @@ also be set here to override the shared value for one widget):
 
 | Key            | Widget   | Meaning                                                                                          |
 |----------------|----------|--------------------------------------------------------------------------------------------------|
-| `visible`      | both     | Written by `showWidget`, `hideWidget`, and `toggleWidget`.                                       |
-| `position`     | both     | `top-left`, `top`, `top-right`, `left`, `center`, `right`, `bottom-left`, `bottom`, `bottom-right`. Widgets given the same position stack vertically in that corner. |
-| `clickCommand` | both     | Shell command run on click. Empty disables the click.                                            |
+| `visible`      | all      | Written by `showWidget`, `hideWidget`, and `toggleWidget`.                                       |
+| `position`     | all      | `top-left`, `top`, `top-right`, `left`, `center`, `right`, `bottom-left`, `bottom`, `bottom-right`. Widgets given the same position stack in that corner in the order monitor, battery, clock. |
+| `clickCommand` | all      | Shell command run on click. Empty disables the click.                                            |
 | `tiles`        | monitor  | Which tiles to draw, in any subset of `cpu`, `gpu`, `mem`, `thermal`, `disk`, `net`. GPU and MEMORY share a row and widen to fill it when the other is absent. |
 | `sensors`      | monitor  | Restrict the THERMAL rows to these ids: `cpu`, `gpu`, `nvme`, `mem`, `wifi`, `ambient`, `battery`. Empty shows every sensor the machine reports. |
 | `lowAt`        | battery  | Percent at which the battery tile turns red while discharging.                                   |
+| `format`       | clock    | `auto` follows the bar's clock widget, else `12h` or `24h`.                                      |
+| `doneCommand`  | clock    | Shell command run when a timer ends. Empty for silence.                                          |
 
 For compatibility the monitor also reads `position`, `tiles`, `sensors`, and
 `clickCommand` from the top level of the entry.
@@ -170,8 +213,9 @@ except `nvidia-smi`, and that only while the dGPU is awake.
 restarts it with backoff if it exits, exposes the IPC target, and creates
 the layer-shell windows on the `bottom` layer with a zero exclusive zone:
 one per screen and corner that has a widget, with widgets that share a
-corner stacked. `widgets/SystemMonitor.qml` and `widgets/Battery.qml` lay
-out the tiles, and `components/` holds the shared parts: `Palette` (theme
+corner stacked. `widgets/SystemMonitor.qml`, `widgets/Battery.qml`, and
+`widgets/Clock.qml` lay out the tiles (timer state lives in `Desktop.qml`
+so every screen shows the same countdown), and `components/` holds the shared parts: `Palette` (theme
 derived colours), `Tile` (the frame), and the dot-matrix primitives
 `DotText` (a 5x7 dot font), `DotRing`, `DotBar`, `DotMatrix`, and
 `RingGauge`.

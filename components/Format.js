@@ -109,3 +109,41 @@ function hours(h) {
   if (hh === 0) return mm + "M"
   return hh + "H " + (mm < 10 ? "0" : "") + mm + "M"
 }
+
+// Remaining time as "24:59" or "1:24:59"
+function countdown(ms) {
+  var total = Math.max(0, Math.ceil((Number(ms) || 0) / 1000))
+  var h = Math.floor(total / 3600)
+  var m = Math.floor((total % 3600) / 60)
+  var s = total % 60
+  var mm = h > 0 && m < 10 ? "0" + m : String(m)
+  var ss = s < 10 ? "0" + s : String(s)
+  return (h > 0 ? h + ":" : "") + mm + ":" + ss
+}
+
+// Parse a timer spec into milliseconds, or NaN:
+//   "25" = 25 minutes, "90s", "25m", "1h", "1h30m", "1h30", "10:00" (m:ss), "1:30:00" (h:mm:ss)
+function parseDuration(spec) {
+  var s = String(spec || "").trim().toLowerCase()
+  if (!s) return NaN
+  if (/^\d+(\.\d+)?$/.test(s)) return parseFloat(s) * 60000
+  var colon = s.match(/^(\d+):(\d{1,2})(?::(\d{1,2}))?$/)
+  if (colon) {
+    if (colon[3] !== undefined) return ((+colon[1]) * 3600 + (+colon[2]) * 60 + (+colon[3])) * 1000
+    return ((+colon[1]) * 60 + (+colon[2])) * 1000
+  }
+  var total = 0, matched = false
+  var re = /(\d+(?:\.\d+)?)\s*(h|m|s)?/g
+  var m
+  var rest = s
+  while ((m = re.exec(s)) !== null) {
+    if (!m[0]) break
+    matched = true
+    var n = parseFloat(m[1])
+    var unit = m[2] || "m"          // a bare trailing number is minutes ("1h30")
+    total += unit === "h" ? n * 3600000 : unit === "s" ? n * 1000 : n * 60000
+    rest = rest.replace(m[0], "")
+  }
+  if (!matched || rest.trim() !== "") return NaN
+  return total
+}

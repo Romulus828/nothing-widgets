@@ -5,6 +5,7 @@ import Quickshell.Wayland
 import qs.Commons
 import qs.Ui
 import "widgets"
+import "components/Format.js" as F
 
 // Service root for the Nothing desktop widgets. The shell instantiates this
 // once at startup and injects `shell` / `manifest`. It owns:
@@ -39,7 +40,7 @@ Item {
   // monitor also reads its keys (position, tiles, sensors, clickCommand) from
   // the top level.
 
-  readonly property var widgetTypes: ["monitor", "battery"]
+  readonly property var widgetTypes: ["monitor", "battery", "clock"]
 
   readonly property var sharedDefaults: ({
     marginX: 16,
@@ -63,6 +64,13 @@ Item {
       visible: true,           // still hidden while the machine reports no battery
       position: "top-right",
       lowAt: 15,
+      clickCommand: ""
+    },
+    clock: {
+      visible: true,
+      position: "top-right",   // stacks under the battery
+      format: "auto",          // auto | 12h | 24h
+      doneCommand: "notify-send -u critical 'Timer done'",
       clickCommand: ""
     }
   })
@@ -107,10 +115,14 @@ Item {
   // Visibility is persisted on the shell.json entry so a toggle survives a
   // restart; `shown` mirrors the master switch and is what the windows bind to.
   property bool shown: true
-  onEntryChanged: shown = setting("visible") !== false
+  onEntryChanged: {
+    shown = setting("visible") !== false
+    timerRestore()
+  }
   Component.onCompleted: {
     shown = setting("visible") !== false
     syncCollector()
+    timerRestore()
   }
 
   function persist(mutate) {
@@ -133,6 +145,151 @@ Item {
       if (!Util.isPlainObject(e.widgets[name])) e.widgets[name] = {}
       e.widgets[name].visible = value === true
     })
+  }
+
+  // ------------------------------------------------------------- timer
+  //
+  // One countdown shared by every screen. `timerEndsAt` is an epoch ms while
+  // running, `timerPausedRemaining` is >= 0 while paused, and a finished
+  // timer sits at zero with `timerDone` until dismissed or 2 minutes pass.
+  // The state is persisted on the plugin entry so a shell restart keeps it.
+
+  property double timerEndsAt: 0
+  property double timerDurationMs: 0
+  property double timerPausedRemaining: -1
+  property bool timerDone: false
+  property double timerNow: Date.now()
+
+  readonly property bool timerActive: timerEndsAt > 0 || timerPausedRemaining >= 0
+  readonly property bool timerPaused: timerPausedRemaining >= 0 && !timerDone
+  readonly property double timerRemainingMs: timerPausedRemaining >= 0 ? timerPausedRemaining : Math.max(0, timerEndsAt - timerNow)
+
+  Timer {
+    interval: 250
+    running: root.timerEndsAt > 0 && !root.timerDone
+    repeat: true
+    onTriggered: {
+      root.timerNow = Date.now()
+      if (root.timerEndsAt - root.timerNow <= 0) root.timerFinish()
+    }
+  }
+
+  Timer {
+    id: timerDismiss
+    interval: 120000
+    repeat: false
+    onTriggered: root.timerStop()
+  }
+
+  function timerStart(ms) {
+    if (!(ms > 0)) return false
+    timerDone = false
+    timerDismiss.stop()
+    timerDurationMs = ms
+    timerPausedRemaining = -1
+    timerNow = Date.now()
+    timerEndsAt = timerNow + ms
+    timerPersist()
+    return true
+  }
+
+  function timerPause() {
+    if (!timerActive || timerPaused || timerDone) return
+    timerNow = Date.now()
+    timerPausedRemaining = Math.max(0, timerEndsAt - timerNow)
+    timerEndsAt = 0
+    timerPersist()
+  }
+
+  function timerResume() {
+    if (!timerPaused) return
+    timerNow = Date.now()
+    timerEndsAt = timerNow + timerPausedRemaining
+    timerPausedRemaining = -1
+    timerPersist()
+  }
+
+  function timerToggle() { if (timerPaused) timerResume(); else timerPause() }
+
+  function timerStop() {
+    timerDismiss.stop()
+    timerEndsAt = 0
+    timerPausedRemaining = -1
+    timerDurationMs = 0
+    timerDone = false
+    timerPersist()
+  }
+
+  function timerFinish() {
+    timerEndsAt = 0
+    timerPausedRemaining = 0
+    timerDone = true
+    timerDismiss.restart()
+    var cmd = String(widgetSetting("clock", "doneCommand") || "")
+    if (cmd) Util.execDetached(cmd)
+    timerPersist()
+  }
+
+  function timerPersist() {
+    persist(function(e) {
+      if (!Util.isPlainObject(e.widgets)) e.widgets = {}
+      if (!Util.isPlainObject(e.widgets.clock)) e.widgets.clock = {}
+      if (timerActive && !timerDone) {
+        e.widgets.clock.timer = { endsAt: timerEndsAt, durationMs: timerDurationMs, pausedRemaining: timerPausedRemaining }
+      } else {
+        delete e.widgets.clock.timer
+      }
+    })
+  }
+
+  // Runs at startup and again on the first settings load, since the entry
+  // may not be populated yet when the service completes.
+  property bool timerRestored: false
+  function timerRestore() {
+    if (timerRestored || !entry.id) return
+    timerRestored = true
+    var t = widgetEntry("clock").timer
+    if (!Util.isPlainObject(t)) return
+    var dur = Number(t.durationMs) || 0
+    if (Number(t.pausedRemaining) >= 0) {
+      timerDurationMs = dur
+      timerPausedRemaining = Number(t.pausedRemaining)
+      timerEndsAt = 0
+    } else if (Number(t.endsAt) > Date.now()) {
+      timerDurationMs = dur
+      timerPausedRemaining = -1
+      timerEndsAt = Number(t.endsAt)
+    }
+    // an end time already in the past while the shell was down is just dropped
+  }
+
+  // "auto" clock format follows the bar's clock widget (its `format` in
+  // shell.json), falling back to the locale.
+  readonly property string clockFormat: {
+    var f = String(widgetSetting("clock", "format") || "auto")
+    if (f === "12h" || f === "24h") return f
+    var cfg = shell ? shell.shellConfig : null
+    var layout = Util.isPlainObject(cfg) && Util.isPlainObject(cfg.bar) && Util.isPlainObject(cfg.bar.layout) ? cfg.bar.layout : null
+    if (layout) {
+      var sections = ["left", "center", "right"]
+      for (var i = 0; i < sections.length; i++) {
+        var items = layout[sections[i]]
+        if (!Array.isArray(items)) continue
+        for (var j = 0; j < items.length; j++) {
+          var w = items[j]
+          if (Util.isPlainObject(w) && w.id === "omarchy.clock" && typeof w.format === "string") {
+            return w.format.indexOf("AP") !== -1 || w.format.indexOf("ap") !== -1 ? "12h" : "24h"
+          }
+        }
+      }
+    }
+    return Qt.locale().timeFormat(Locale.ShortFormat).indexOf("AP") !== -1 ? "12h" : "24h"
+  }
+
+  function timerStatus() {
+    if (!timerActive) return "idle"
+    if (timerDone) return "done"
+    return (timerPaused ? "paused " : "running ") + F.countdown(timerRemainingMs)
   }
 
   // ------------------------------------------------------------- data
@@ -237,6 +394,19 @@ Item {
       return next ? "shown" : "hidden"
     }
     function refresh(): string { root.restartCollector(); return "ok" }
+    // Timer: `timer 25m` | `timer 10:00` | `timer 1h30m` | `timer pause` | `timer resume` | `timer toggle` | `timer stop` | `timer status`
+    function timer(spec: string): string {
+      var s = String(spec || "").trim().toLowerCase()
+      if (s === "" || s === "status") return root.timerStatus()
+      if (s === "stop" || s === "cancel" || s === "clear") { root.timerStop(); return "stopped" }
+      if (s === "pause") { root.timerPause(); return root.timerStatus() }
+      if (s === "resume") { root.timerResume(); return root.timerStatus() }
+      if (s === "toggle") { root.timerToggle(); return root.timerStatus() }
+      var ms = F.parseDuration(s)
+      if (!(ms > 0)) return "usage: timer 25m | 10:00 | 1h30m | pause | resume | toggle | stop | status"
+      root.timerStart(ms)
+      return root.timerStatus()
+    }
     // Render the first visible window's widgets to a PNG without touching the
     // screen. Useful for sharing a look or checking a layout change.
     function snapshot(path: string): string { return root.snapshotTo(path, "") }
@@ -257,6 +427,7 @@ Item {
         lastSampleAgeMs: root.lastSampleAt ? Date.now() - root.lastSampleAt : null,
         lastError: root.lastError,
         widgets: widgets,
+        timer: root.timerStatus(),
         windows: root.windowModel.map(function(w) { return w.key }),
         screens: Quickshell.screens.map(function(s) { return s.name })
       })
@@ -392,10 +563,16 @@ Item {
         // own conditions rather than from their visible flags.
         readonly property bool monitorOn: monitorSlot.active && monitorSlot.item !== null && monitorSlot.item.wanted
         readonly property bool batteryOn: batterySlot.active && batterySlot.item !== null && batterySlot.item.wanted
+        readonly property bool clockOn: clockSlot.active && clockSlot.item !== null && clockSlot.item.wanted
         readonly property real monitorH: monitorOn ? monitorSlot.implicitHeight : 0
         readonly property real batteryH: batteryOn ? batterySlot.implicitHeight : 0
-        implicitWidth: Math.max(monitorOn ? monitorSlot.implicitWidth : 0, batteryOn ? batterySlot.implicitWidth : 0)
-        implicitHeight: monitorH + batteryH + (monitorH > 0 && batteryH > 0 ? gutter : 0)
+        readonly property real clockH: clockOn ? clockSlot.implicitHeight : 0
+        // Stack order is monitor, battery, clock; each slot starts after the
+        // visible ones above it.
+        readonly property real batteryY: monitorH > 0 ? monitorH + gutter : 0
+        readonly property real clockY: batteryY + (batteryH > 0 ? batteryH + gutter : 0)
+        implicitWidth: Math.max(monitorOn ? monitorSlot.implicitWidth : 0, batteryOn ? batterySlot.implicitWidth : 0, clockOn ? clockSlot.implicitWidth : 0)
+        implicitHeight: clockH > 0 ? clockY + clockH : (batteryH > 0 ? batteryY + batteryH : monitorH)
         width: implicitWidth
         height: implicitHeight
         Component.onCompleted: root.registerContent(content)
@@ -407,7 +584,7 @@ Item {
                      item: k.item ? { wanted: k.item.wanted, ih: k.item.implicitHeight } : null }
           }
           return { pos: windowPosition, w: width, h: height, winVisible: win.visible, wanted: win.wanted,
-                   monitor: slot(monitorSlot), battery: slot(batterySlot) }
+                   monitor: slot(monitorSlot), battery: slot(batterySlot), clock: slot(clockSlot) }
         }
 
         Loader {
@@ -428,7 +605,7 @@ Item {
 
         Loader {
           id: batterySlot
-          y: content.monitorH > 0 ? content.monitorH + content.gutter : 0
+          y: content.batteryY
           active: win.hasWidget("battery")
           visible: content.batteryOn
           sourceComponent: Battery {
@@ -438,6 +615,20 @@ Item {
             tileAlpha: root.widgetAlpha("battery")
             clickCommand: String(root.widgetSetting("battery", "clickCommand") || "")
             lowAt: Math.round(Number(root.widgetSetting("battery", "lowAt")) || 15)
+          }
+        }
+
+        Loader {
+          id: clockSlot
+          y: content.clockY
+          active: win.hasWidget("clock")
+          visible: content.clockOn
+          sourceComponent: Clock {
+            host: root
+            scale: root.widgetScale("clock")
+            tileAlpha: root.widgetAlpha("clock")
+            format: root.clockFormat
+            clickCommand: String(root.widgetSetting("clock", "clickCommand") || "")
           }
         }
       }
