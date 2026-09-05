@@ -409,24 +409,83 @@ def net():
 
 
 def battery():
+    """First battery under /sys/class/power_supply plus whether mains is online.
+    Works with both charge_* (µAh) and energy_* (µWh) batteries."""
+    ac_online = None
+    for d in sorted(glob.glob("/sys/class/power_supply/*")):
+        if read(os.path.join(d, "type")) == "Mains":
+            on = read_int(os.path.join(d, "online"))
+            if on is not None:
+                ac_online = bool(on) if ac_online is None else (ac_online or bool(on))
+
     for d in sorted(glob.glob("/sys/class/power_supply/BAT*")):
         cap = read_int(os.path.join(d, "capacity"))
         if cap is None:
             continue
-        power = read_int(os.path.join(d, "power_now"))
+
+        def val(name):
+            return read_int(os.path.join(d, name))
+
+        volts = val("voltage_now")
+        amps = val("current_now")
+        power = val("power_now")
         if power:
             power_w = power / 1e6
+        elif volts and amps:
+            power_w = abs(volts * amps) / 1e12
         else:
-            v = read_int(os.path.join(d, "voltage_now"))
-            i = read_int(os.path.join(d, "current_now"))
-            power_w = (v * i / 1e12) if (v and i) else None
+            power_w = None
+
+        # Prefer energy (Wh); derive it from charge (Ah) × design voltage otherwise.
+        e_now, e_full, e_design = val("energy_now"), val("energy_full"), val("energy_full_design")
+        if e_now is None:
+            c_now, c_full, c_design = val("charge_now"), val("charge_full"), val("charge_full_design")
+            v_ref = val("voltage_min_design") or volts
+            if c_now is not None and v_ref:
+                e_now = c_now * v_ref / 1e6
+                e_full = c_full * v_ref / 1e6 if c_full else None
+                e_design = c_design * v_ref / 1e6 if c_design else None
+        wh = lambda x: round(x / 1e6, 2) if x else None
+
+        health = None
+        if e_full and e_design:
+            health = round(100.0 * e_full / e_design, 1)
+
+        status = read(os.path.join(d, "status"), "Unknown")
+        # Time estimates: the kernel's if it has one, else energy / power.
+        tte = val("time_to_empty_now")
+        ttf = val("time_to_full_now")
+        hours_left = hours_to_full = None
+        if status == "Discharging":
+            if tte:
+                hours_left = tte / 3600.0
+            elif e_now and power_w:
+                hours_left = (e_now / 1e6) / power_w
+        elif status == "Charging":
+            if ttf:
+                hours_to_full = ttf / 3600.0
+            elif e_now is not None and e_full and power_w:
+                hours_to_full = max(0.0, (e_full - e_now) / 1e6) / power_w
+
         return {
             "present": True,
             "capacity": cap,
-            "status": read(os.path.join(d, "status"), "Unknown"),
+            "status": status,
+            "ac_online": ac_online,
             "power_w": power_w,
+            "voltage_v": volts / 1e6 if volts else None,
+            "energy_wh": wh(e_now),
+            "energy_full_wh": wh(e_full),
+            "energy_design_wh": wh(e_design),
+            "health": health,
+            "cycles": val("cycle_count"),
+            "hours_left": round(hours_left, 2) if hours_left is not None else None,
+            "hours_to_full": round(hours_to_full, 2) if hours_to_full is not None else None,
+            "charge_start": val("charge_control_start_threshold"),
+            "charge_end": val("charge_control_end_threshold"),
+            "technology": read(os.path.join(d, "technology")),
         }
-    return {"present": False}
+    return {"present": False, "ac_online": ac_online}
 
 
 # ------------------------------------------------------------ temps and fans

@@ -10,8 +10,9 @@ import "widgets"
 // once at startup and injects `shell` / `manifest`. It owns:
 //   - the settings, read inline from this plugin's entry in shell.json
 //   - one long-running metrics collector (collector.py, JSON lines)
-//   - one layer-shell window per screen on the Bottom layer (above the
-//     wallpaper, below windows) that hosts the widget
+//   - layer-shell windows on the Bottom layer (above the wallpaper, below
+//     windows): one per screen and screen corner that hosts a widget, with
+//     the widgets that share a corner stacked in a column
 //   - the `nothing-widgets` IPC target: omarchy-shell nothing-widgets toggle
 Item {
   id: root
@@ -32,20 +33,38 @@ Item {
   readonly property string collectorPath: sourceDir + "/collector.py"
 
   // ------------------------------------------------------------- settings
+  //
+  // Top-level keys are shared by every widget; `widgets.<name>` holds a
+  // widget's own keys and may override any shared one. For compatibility the
+  // monitor also reads its keys (position, tiles, sensors, clickCommand) from
+  // the top level.
 
-  readonly property var defaults: ({
-    position: "top-right",     // top-left | top | top-right | left | center | right | bottom-left | bottom | bottom-right
+  readonly property var widgetTypes: ["monitor", "battery"]
+
+  readonly property var sharedDefaults: ({
     marginX: 16,
     marginY: 16,
     scale: 1.0,
     interval: 2,
     screen: "",                // "" = every screen, else a connector name such as "eDP-1"
-    visible: true,
-    columns: 2,
-    tiles: ["cpu", "gpu", "mem", "thermal", "disk", "net"],
-    sensors: [],               // thermal rows to show by id (cpu, gpu, nvme, mem, wifi, ambient, battery); empty = all
-    tileAlpha: 1.0,
-    clickCommand: "omarchy-launch-or-focus-tui btop"
+    visible: true,             // master switch, what show/hide/toggle flip
+    tileAlpha: 1.0
+  })
+
+  readonly property var widgetDefaults: ({
+    monitor: {
+      visible: true,
+      position: "top-right",   // top-left | top | top-right | left | center | right | bottom-left | bottom | bottom-right
+      tiles: ["cpu", "gpu", "mem", "thermal", "disk", "net"],
+      sensors: [],             // thermal rows to show by id (cpu, gpu, nvme, mem, wifi, ambient, battery); empty = all
+      clickCommand: "omarchy-launch-or-focus-tui btop"
+    },
+    battery: {
+      visible: true,           // still hidden while the machine reports no battery
+      position: "top-left",
+      lowAt: 15,
+      clickCommand: ""
+    }
   })
 
   readonly property var entry: {
@@ -58,25 +77,35 @@ Item {
     return ({})
   }
 
+  function present(v) { return v !== undefined && v !== null }
+
   function setting(key) {
-    var v = entry[key]
-    return v === undefined || v === null ? defaults[key] : v
+    return present(entry[key]) ? entry[key] : sharedDefaults[key]
   }
 
-  readonly property string position: String(setting("position"))
-  readonly property int marginX: Math.round(Number(setting("marginX")))
-  readonly property int marginY: Math.round(Number(setting("marginY")))
-  readonly property real scale: Math.max(0.5, Math.min(3, Number(setting("scale")) || 1))
+  function widgetEntry(name) {
+    var w = entry.widgets
+    return Util.isPlainObject(w) && Util.isPlainObject(w[name]) ? w[name] : ({})
+  }
+
+  function widgetSetting(name, key) {
+    var w = widgetEntry(name)
+    if (present(w[key])) return w[key]
+    var shared = sharedDefaults[key] !== undefined
+    if (key !== "visible" && (shared || name === "monitor") && present(entry[key])) return entry[key]
+    var d = widgetDefaults[name] || ({})
+    if (d[key] !== undefined) return d[key]
+    return sharedDefaults[key]
+  }
+
+  function widgetScale(name) { return Math.max(0.5, Math.min(3, Number(widgetSetting(name, "scale")) || 1)) }
+  function widgetAlpha(name) { return Util.clampAlpha(Number(widgetSetting(name, "tileAlpha"))) }
+  function widgetVisible(name) { return widgetSetting(name, "visible") !== false }
+
   readonly property real interval: Math.max(0.5, Number(setting("interval")) || 2)
-  readonly property string screenFilter: String(setting("screen") || "")
-  readonly property int columns: Math.max(1, Math.min(3, Math.round(Number(setting("columns")) || 2)))
-  readonly property var tiles: Array.isArray(setting("tiles")) ? setting("tiles") : defaults.tiles
-  readonly property var sensors: Array.isArray(setting("sensors")) ? setting("sensors") : []
-  readonly property real tileAlpha: Util.clampAlpha(Number(setting("tileAlpha")))
-  readonly property string clickCommand: String(setting("clickCommand") || "")
 
   // Visibility is persisted on the shell.json entry so a toggle survives a
-  // restart; `shown` mirrors it and is what the windows bind to.
+  // restart; `shown` mirrors the master switch and is what the windows bind to.
   property bool shown: true
   onEntryChanged: shown = setting("visible") !== false
   Component.onCompleted: {
@@ -84,13 +113,26 @@ Item {
     syncCollector()
   }
 
+  function persist(mutate) {
+    if (!(shell && typeof shell.updateEntryInline === "function" && entry.id)) return false
+    var merged = Util.cloneJson(entry)
+    mutate(merged)
+    shell.updateEntryInline(pluginId, merged)
+    return true
+  }
+
   function setShown(value) {
     shown = value === true
-    if (shell && typeof shell.updateEntryInline === "function" && entry.id) {
-      var merged = Util.cloneJson(entry)
-      merged.visible = shown
-      shell.updateEntryInline(pluginId, merged)
-    }
+    persist(function(e) { e.visible = shown })
+  }
+
+  function setWidgetShown(name, value) {
+    if (widgetTypes.indexOf(name) === -1) return false
+    return persist(function(e) {
+      if (!Util.isPlainObject(e.widgets)) e.widgets = {}
+      if (!Util.isPlainObject(e.widgets[name])) e.widgets[name] = {}
+      e.widgets[name].visible = value === true
+    })
   }
 
   // ------------------------------------------------------------- data
@@ -185,27 +227,34 @@ Item {
     function show(): string { root.setShown(true); return "ok" }
     function hide(): string { root.setShown(false); return "ok" }
     function toggle(): string { root.setShown(!root.shown); return root.shown ? "shown" : "hidden" }
-    function refresh(): string { root.restartCollector(); return "ok" }
-    // Render the widget to a PNG without touching the screen. Useful for
-    // sharing a look or checking a layout change while windows cover it.
-    function snapshot(path: string): string {
-      var target = String(path || "")
-      if (!target) return "usage: snapshot /absolute/path.png"
-      var item = root.firstMonitorItem()
-      if (!item) return "no visible widget"
-      var ok = item.grabToImage(function(result) {
-        if (!result.saveToFile(target)) console.warn("nothing-widgets: snapshot failed to save", target)
-      }, Qt.size(Math.ceil(item.width * 2), Math.ceil(item.height * 2)))
-      return ok ? "ok" : "grab failed"
+    // Per-widget switches: monitor | battery
+    function showWidget(name: string): string { return root.setWidgetShown(name, true) ? "ok" : "unknown widget " + name }
+    function hideWidget(name: string): string { return root.setWidgetShown(name, false) ? "ok" : "unknown widget " + name }
+    function toggleWidget(name: string): string {
+      if (root.widgetTypes.indexOf(name) === -1) return "unknown widget " + name
+      var next = !root.widgetVisible(name)
+      root.setWidgetShown(name, next)
+      return next ? "shown" : "hidden"
     }
+    function refresh(): string { root.restartCollector(); return "ok" }
+    // Render the first visible window's widgets to a PNG without touching the
+    // screen. Useful for sharing a look or checking a layout change.
+    function snapshot(path: string): string { return root.snapshotTo(path, "") }
+    // Same, for the window at a given position (e.g. "top-left").
+    function snapshotAt(path: string, position: string): string { return root.snapshotTo(path, String(position || "")) }
     function status(): string {
+      var widgets = {}
+      for (var i = 0; i < root.widgetTypes.length; i++) {
+        var n = root.widgetTypes[i]
+        widgets[n] = { visible: root.widgetVisible(n), position: String(root.widgetSetting(n, "position")), scale: root.widgetScale(n) }
+      }
       return JSON.stringify({
         shown: root.shown,
         collectorRunning: collector.running,
         lastSampleAgeMs: root.lastSampleAt ? Date.now() - root.lastSampleAt : null,
         lastError: root.lastError,
-        position: root.position,
-        scale: root.scale,
+        widgets: widgets,
+        windows: root.windowModel.map(function(w) { return w.key }),
         screens: Quickshell.screens.map(function(s) { return s.name })
       })
     }
@@ -213,43 +262,86 @@ Item {
 
   // ------------------------------------------------------------- windows
 
-  property var monitorItems: []
+  function snapshotTo(path, position) {
+    var target = String(path || "")
+    if (!target) return "usage: snapshot /absolute/path.png"
+    var item = firstContentItem(position)
+    if (!item) return "no visible widget"
+    var ok = item.grabToImage(function(result) {
+      if (!result.saveToFile(target)) console.warn("nothing-widgets: snapshot failed to save", target)
+    }, Qt.size(Math.ceil(item.width * 2), Math.ceil(item.height * 2)))
+    return ok ? "ok" : "grab failed"
+  }
 
-  function registerMonitor(item) {
-    var next = monitorItems.slice()
+  property var contentItems: []
+
+  function registerContent(item) {
+    var next = contentItems.slice()
     if (next.indexOf(item) === -1) next.push(item)
-    monitorItems = next
+    contentItems = next
   }
 
-  function unregisterMonitor(item) {
-    monitorItems = monitorItems.filter(function(m) { return m !== item })
+  function unregisterContent(item) {
+    contentItems = contentItems.filter(function(m) { return m !== item })
   }
 
-  function firstMonitorItem() {
-    for (var i = 0; i < monitorItems.length; i++) {
-      var m = monitorItems[i]
-      if (m && m.visible && m.width > 0) return m
+  function firstContentItem(position) {
+    for (var i = 0; i < contentItems.length; i++) {
+      var m = contentItems[i]
+      if (!(m && m.visible && m.width > 0 && m.height > 0)) continue
+      if (position && m.windowPosition !== position) continue
+      return m
     }
     return null
   }
 
-  readonly property string vAnchor: position.indexOf("top") === 0 ? "top" : position.indexOf("bottom") === 0 ? "bottom" : "center"
-  readonly property string hAnchor: {
-    if (position.indexOf("left") !== -1) return "left"
-    if (position.indexOf("right") !== -1) return "right"
-    return "center"
+  // One window per (screen, position) that has at least one enabled widget.
+  // Depends only on settings and the screen list, so it is rebuilt when those
+  // change and never per sample.
+  readonly property var windowModel: {
+    var out = []
+    var screens = Quickshell.screens
+    for (var s = 0; s < screens.length; s++) {
+      var screen = screens[s]
+      var groups = {}
+      var order = []
+      for (var i = 0; i < widgetTypes.length; i++) {
+        var name = widgetTypes[i]
+        if (!widgetVisible(name)) continue
+        var filter = String(widgetSetting(name, "screen") || "")
+        if (filter !== "" && String(screen.name) !== filter) continue
+        var pos = String(widgetSetting(name, "position") || "top-right")
+        if (!groups[pos]) { groups[pos] = []; order.push(pos) }
+        groups[pos].push(name)
+      }
+      for (var p = 0; p < order.length; p++) {
+        out.push({
+          key: String(screen.name) + ":" + order[p],
+          screen: screen,
+          position: order[p],
+          widgets: groups[order[p]],
+          marginX: Math.round(Number(widgetSetting(groups[order[p]][0], "marginX"))),
+          marginY: Math.round(Number(widgetSetting(groups[order[p]][0], "marginY")))
+        })
+      }
+    }
+    return out
   }
 
   Variants {
-    model: Quickshell.screens
+    model: root.windowModel
 
     PanelWindow {
       id: win
       required property var modelData
 
-      screen: modelData
-      readonly property bool wanted: root.shown
-        && (root.screenFilter === "" || String(modelData.name) === root.screenFilter)
+      screen: modelData.screen
+      readonly property string vAnchor: modelData.position.indexOf("top") === 0 ? "top"
+        : modelData.position.indexOf("bottom") === 0 ? "bottom" : "center"
+      readonly property string hAnchor: modelData.position.indexOf("left") !== -1 ? "left"
+        : modelData.position.indexOf("right") !== -1 ? "right" : "center"
+
+      readonly property bool wanted: root.shown && content.implicitHeight > 0
       visible: wanted && !remapGuard.remapping
 
       ScreenMoveRemap {
@@ -267,33 +359,58 @@ Item {
       aboveWindows: false
 
       anchors {
-        top: root.vAnchor === "top"
-        bottom: root.vAnchor === "bottom"
-        left: root.hAnchor === "left"
-        right: root.hAnchor === "right"
+        top: win.vAnchor === "top"
+        bottom: win.vAnchor === "bottom"
+        left: win.hAnchor === "left"
+        right: win.hAnchor === "right"
       }
       margins {
-        top: root.vAnchor === "top" ? root.marginY : 0
-        bottom: root.vAnchor === "bottom" ? root.marginY : 0
-        left: root.hAnchor === "left" ? root.marginX : 0
-        right: root.hAnchor === "right" ? root.marginX : 0
+        top: win.vAnchor === "top" ? modelData.marginY : 0
+        bottom: win.vAnchor === "bottom" ? modelData.marginY : 0
+        left: win.hAnchor === "left" ? modelData.marginX : 0
+        right: win.hAnchor === "right" ? modelData.marginX : 0
       }
 
-      implicitWidth: Math.ceil(monitor.implicitWidth)
-      implicitHeight: Math.ceil(monitor.implicitHeight)
+      implicitWidth: Math.max(1, Math.ceil(content.implicitWidth))
+      implicitHeight: Math.max(1, Math.ceil(content.implicitHeight))
 
-      SystemMonitor {
-        id: monitor
-        sample: root.sample
-        stale: root.stale
-        scale: root.scale
-        columns: root.columns
-        tiles: root.tiles
-        sensors: root.sensors
-        tileAlpha: root.tileAlpha
-        clickCommand: root.clickCommand
-        Component.onCompleted: root.registerMonitor(monitor)
-        Component.onDestruction: root.unregisterMonitor(monitor)
+      function hasWidget(name) { return modelData.widgets.indexOf(name) !== -1 }
+
+      // Widgets sharing this corner, stacked with the same 8 px gutter the
+      // monitor uses between its own tiles.
+      Column {
+        id: content
+        readonly property string windowPosition: win.modelData.position
+        spacing: 8
+        Component.onCompleted: root.registerContent(content)
+        Component.onDestruction: root.unregisterContent(content)
+
+        Loader {
+          active: win.hasWidget("monitor")
+          visible: active && item && item.visible
+          sourceComponent: SystemMonitor {
+            sample: root.sample
+            stale: root.stale
+            scale: root.widgetScale("monitor")
+            tiles: Array.isArray(root.widgetSetting("monitor", "tiles")) ? root.widgetSetting("monitor", "tiles") : root.widgetDefaults.monitor.tiles
+            sensors: Array.isArray(root.widgetSetting("monitor", "sensors")) ? root.widgetSetting("monitor", "sensors") : []
+            tileAlpha: root.widgetAlpha("monitor")
+            clickCommand: String(root.widgetSetting("monitor", "clickCommand") || "")
+          }
+        }
+
+        Loader {
+          active: win.hasWidget("battery")
+          visible: active && item && item.visible
+          sourceComponent: Battery {
+            sample: root.sample
+            stale: root.stale
+            scale: root.widgetScale("battery")
+            tileAlpha: root.widgetAlpha("battery")
+            clickCommand: String(root.widgetSetting("battery", "clickCommand") || "")
+            lowAt: Math.round(Number(root.widgetSetting("battery", "lowAt")) || 15)
+          }
+        }
       }
     }
   }

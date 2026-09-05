@@ -99,3 +99,13 @@ function clamp01(v) {
   if (!isNum(v)) return 0
   return Math.max(0, Math.min(1, v))
 }
+
+// Hours as "4H 48M"; under an hour just "48M"
+function hours(h) {
+  if (!isNum(h) || h < 0) return "--"
+  var total = Math.round(h * 60)
+  var hh = Math.floor(total / 60)
+  var mm = total % 60
+  if (hh === 0) return mm + "M"
+  return hh + "H " + (mm < 10 ? "0" : "") + mm + "M"
+}

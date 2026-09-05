@@ -22,31 +22,20 @@ Item {
   property string clickCommand: ""
 
   // ----------------------------------------------------------- palette
-  //
-  // Every grey is a mix of the theme's background and foreground so the
-  // widget stays coherent on other Omarchy themes; on Nothing they resolve
-  // to the values in the comments.
 
-  readonly property color fg: Color.foreground
-  readonly property color bg: Color.background
-  readonly property color accent: Color.accent
-  readonly property string fontFamily: Style.font.family
-
-  function mix(k) {
-    return Qt.rgba(bg.r + (fg.r - bg.r) * k, bg.g + (fg.g - bg.g) * k, bg.b + (fg.b - bg.b) * k, 1)
-  }
-  readonly property real fgLuma: 0.2126 * fg.r + 0.7152 * fg.g + 0.0722 * fg.b
-  readonly property color dotOn: fgLuma > 0.9 ? "#ffffff" : fg          // lit dots
-  readonly property color ink: fg                                        // text values      #f2f2f2
-  readonly property color labelColor: mix(0.58)                          // labels           #8c8c8c
-  readonly property color tertiary: mix(0.38)                            // missing / stale  #5c5c5c
-  readonly property color dotOff: mix(0.19)                              // unlit dots       #2e2e2e
-  readonly property color line: mix(0.15)                                // hairline         #262626
-  readonly property color tileFill: {
-    var c = mix(0.09)                                                    // tile             #161616
-    return Qt.rgba(c.r, c.g, c.b, tileAlpha)
-  }
-  readonly property color redText: Qt.lighter(accent, 1.3)
+  Palette { id: pal; tileAlpha: root.tileAlpha }
+  readonly property color fg: pal.fg
+  readonly property color bg: pal.bg
+  readonly property color accent: pal.accent
+  readonly property string fontFamily: pal.fontFamily
+  readonly property color dotOn: pal.dotOn
+  readonly property color ink: pal.ink
+  readonly property color labelColor: pal.labelColor
+  readonly property color tertiary: pal.tertiary
+  readonly property color dotOff: pal.dotOff
+  readonly property color line: pal.line
+  readonly property color tileFill: pal.tileFill
+  readonly property color redText: pal.redText
 
   // ----------------------------------------------------------- geometry
 
@@ -140,43 +129,17 @@ Item {
     renderType: Text.NativeRendering
   }
 
-  // Ring gauge with a dot numeral centred inside and a unit label under it.
-  component RingTile: Item {
-    property real value: 0
-    property string text: "--"
-    property string unit: "%"
-    property color dots: root.dotOn
-    property bool active: true
-    anchors.fill: parent
-    DotRing {
-      id: ring
-      width: root.u(88)
-      height: root.u(88)
-      anchors.horizontalCenter: parent.horizontalCenter
-      y: root.u(2)
-      value: parent.active ? parent.value : 0
-      count: 36
-      dotRadius: Math.max(1.5, 2.0 * root.scale)
-      headRadius: Math.max(2, 2.75 * root.scale)
-      color: root.stale ? root.tertiary : root.dotOn
-      offColor: root.dotOff
-    }
-    DotText {
-      anchors.horizontalCenter: ring.horizontalCenter
-      anchors.verticalCenter: ring.verticalCenter
-      anchors.verticalCenterOffset: -root.u(5)
-      text: parent.active ? parent.text : "-"
-      pitch: String(parent.text).length >= 3 ? root.u(4) : root.u(6)
-      weight: 0.39
-      color: parent.active ? parent.dots : root.tertiary
-      horizontalAlignment: Text.AlignHCenter
-    }
-    Caption {
-      anchors.horizontalCenter: ring.horizontalCenter
-      anchors.verticalCenter: ring.verticalCenter
-      anchors.verticalCenterOffset: root.u(24)
-      text: parent.unit
-    }
+  // Ring gauge sized and coloured for a half tile.
+  component RingTile: RingGauge {
+    anchors.horizontalCenter: parent.horizontalCenter
+    y: root.u(2)
+    scale: root.scale
+    stale: root.stale
+    ringColor: root.dotOn
+    offColor: root.dotOff
+    tertiary: root.tertiary
+    captionColor: root.labelColor
+    fontFamily: root.fontFamily
   }
 
   // One thermal row: name, dot bar, dot numeral.
